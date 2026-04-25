@@ -1,0 +1,10 @@
+*.pyc
+__pycache__/
+logs/
+seen_posts.json
+content_hashes.json
+posted_titles.json
+mundo_stats.json
+mundo_learnings.md
+.env
+credentials.json
