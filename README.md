@@ -380,6 +380,36 @@ TMPDIR=/tmp
 
 > **macOS TCC gotcha:** cron cannot write to `~/Documents/` (macOS sandbox blocks it). Keep all log and data files in `~/Library/Logs/` and `~/.config/` instead.
 
+### Step 6 — Wake/Network Recovery (macOS LaunchAgent)
+
+Cron skips when laptop is off or network is down. Install `catchup.py` as a LaunchAgent to re-run missed scripts automatically on wake:
+
+```bash
+# Copy and edit the plist
+cp scripts/com.mundo.catchup.plist ~/Library/LaunchAgents/
+# Edit USER, HOME, and script path if needed
+nano ~/Library/LaunchAgents/com.mundo.catchup.plist
+
+# Load it
+launchctl load ~/Library/LaunchAgents/com.mundo.catchup.plist
+```
+
+**How it works:**
+- Fires on login + every hour
+- Checks `~/.config/mundo-bot/catchup_state.json` to know if today's post/engage already ran (cron writes this on success)
+- If missed: waits up to 60s for network, then runs the missed script
+- Logs to `~/Library/Logs/mundo-bot/catchup.log`
+
+**Required env vars in plist** (same USER issue as cron):
+```xml
+<key>EnvironmentVariables</key>
+<dict>
+    <key>USER</key><string>your_username</string>
+    <key>HOME</key><string>/Users/your_username</string>
+    <key>TMPDIR</key><string>/tmp</string>
+</dict>
+```
+
 ---
 
 ## ❓ FAQ
