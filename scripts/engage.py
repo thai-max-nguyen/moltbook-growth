@@ -58,14 +58,26 @@ def save_hashes(hashes):
     with open(HASHES_FILE, "w") as f:
         json.dump(list(hashes)[-2000:], f)
 
-def haiku(prompt):
+_AUTH_ERRORS = ("not logged in", "please run /login", "authentication", "unauthorized")
+
+def haiku(prompt, timeout=90):
+    # Pass prompt as CLI arg (not stdin) — stdin method broken on some cron setups
     full = f"{PERSONA}\n\n{prompt}"
-    r = subprocess.run(
-        [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001"],
-        input=full, capture_output=True, text=True, timeout=90
-    )
-    lines = r.stdout.strip().split('\n')
-    return '\n'.join(l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)).strip()
+    try:
+        r = subprocess.run(
+            [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001", full[:2000]],
+            capture_output=True, text=True, timeout=timeout
+        )
+        out = r.stdout.strip()
+        # Guard: CLI returns auth error when USER env var missing in cron
+        if any(e in out.lower() for e in _AUTH_ERRORS):
+            print(f"[ERROR] Claude CLI auth failed — ensure USER env var set in crontab")
+            return ""
+        lines = out.split('\n')
+        return '\n'.join(l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)).strip()
+    except subprocess.TimeoutExpired:
+        print(f"[WARN] haiku timeout prompt_len={len(prompt)}")
+        return ""
 
 def solve_captcha(verification_code, challenge):
     """Decode Moltbook's obfuscated math challenge via Haiku and submit to /verify.

@@ -360,7 +360,13 @@ python scripts/engage.py
 ```cron
 # Edit with: crontab -e
 
-# Daily posts: 3x/day
+# CRITICAL (macOS): cron strips USER env — Claude CLI needs it for auth.
+# Without this, claude --print returns "Not logged in" and your bot posts
+# the auth error string as real content. Add these two lines at the top:
+USER=your_username
+TMPDIR=/tmp
+
+# Daily posts: 3x/day (0:00, 6:00, 12:00 UTC = 7am, 1pm, 7pm VN)
 0 0,6,12 * * * /usr/bin/python3 /path/to/scripts/daily_post.py >> /path/to/logs/daily.log 2>&1
 
 # Engagement loop: every 2 hours
@@ -369,6 +375,10 @@ python scripts/engage.py
 # Weekly self-learning sync: Sunday 1:00 UTC
 0 1 * * 0 /usr/bin/python3 /path/to/scripts/sync.py >> /path/to/logs/sync.log 2>&1
 ```
+
+> **macOS cron gotcha:** cron's `/bin/sh` launches with a stripped environment — `USER`, `TMPDIR`, and other vars your shell has are absent. Claude CLI uses `USER` to locate its auth session. If missing, every `--print` call silently returns `"Not logged in · Please run /login"`. The scripts have an auth guard to catch and abort this, but you must set `USER=` in crontab to fix it at the root.
+
+> **macOS TCC gotcha:** cron cannot write to `~/Documents/` (macOS sandbox blocks it). Keep all log and data files in `~/Library/Logs/` and `~/.config/` instead.
 
 ---
 

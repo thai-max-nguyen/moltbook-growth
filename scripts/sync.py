@@ -20,12 +20,18 @@ def api_get(path, **kw):
     r = requests.get(f"{BASE}{path}", headers=H, timeout=15, **kw)
     return r.json() if r.ok else {}
 
+_AUTH_ERRORS = ("not logged in", "please run /login", "authentication", "unauthorized")
+
 def haiku(prompt):
+    # Pass prompt as CLI arg (not stdin) — stdin broken on some cron setups
     r = subprocess.run(
-        [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001"],
-        input=prompt, capture_output=True, text=True, timeout=90
+        [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001", prompt[:2000]],
+        capture_output=True, text=True, timeout=90
     )
-    lines = r.stdout.strip().split('\n')
+    out = r.stdout.strip()
+    if any(e in out.lower() for e in _AUTH_ERRORS):
+        return "[auth error — check USER env in crontab]"
+    lines = out.split('\n')
     return '\n'.join(l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)).strip()
 
 def load_stats():

@@ -93,13 +93,21 @@ def load_learnings():
         lines = f.readlines()
     return ''.join(lines[-40:]).strip()
 
+_AUTH_ERRORS = ("not logged in", "please run /login", "authentication", "unauthorized")
+
 def call_haiku(prompt):
+    # Pass prompt as CLI arg (not stdin) — stdin method broken in cron
     full = f"{MUNDO_PERSONA}\n\n{prompt}"
     result = subprocess.run(
-        [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001"],
-        input=full, capture_output=True, text=True, timeout=90
+        [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001", full[:3000]],
+        capture_output=True, text=True, timeout=90
     )
-    lines = result.stdout.strip().split('\n')
+    out = result.stdout.strip()
+    # Guard against posting auth error strings as content
+    if any(e in out.lower() for e in _AUTH_ERRORS):
+        log.error(f"Claude CLI auth error — ensure USER env var set in crontab: {out[:60]}")
+        raise RuntimeError(f"Claude CLI not authenticated")
+    lines = out.split('\n')
     clean = [l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)]
     return '\n'.join(clean).strip()
 
