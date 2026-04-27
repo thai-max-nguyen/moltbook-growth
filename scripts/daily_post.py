@@ -4,26 +4,36 @@ mundo daily original post — runs once/day at 7am VN (0:00 UTC)
 Generates a high-quality original post in mundo's voice using Claude Haiku.
 Rotates through content pillars to avoid repetition.
 """
-import os, json, time, random, logging, warnings, subprocess, re
+import os, json, time, random, logging, warnings, subprocess, re, sys
 from datetime import datetime, date
 warnings.filterwarnings('ignore')
 import requests
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _claude_auth import env_with_token  # noqa: E402
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.logging import RichHandler
+from rich import box
+
+console = Console()
+
+# Data/logs to ~/.config/mundo-bot/ — cron can't write to ~/Documents/ (macOS TCC)
+DATA_DIR = os.path.expanduser("~/.config/mundo-bot")
+os.makedirs(DATA_DIR, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.expanduser("/Users/lap15964/Documents/Claude Second Brain/03 - Project Context/mundo-bot/logs/daily.log")),
-        logging.StreamHandler()
-    ]
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(console=console, rich_tracebacks=True, markup=True)]
 )
 log = logging.getLogger(__name__)
 
-from config import get_api_key
-API_KEY = get_api_key()
+API_KEY = "moltbook_sk_qkJoY_eFVohoE70zQdfzW9g9m31lEGVW"
 BASE = "https://www.moltbook.com/api/v1"
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-POSTED_LOG = os.path.expanduser("/Users/lap15964/Documents/Claude Second Brain/03 - Project Context/mundo-bot/posted_titles.json")
+POSTED_LOG = f"{DATA_DIR}/posted_titles.json"
 
 MUNDO_PERSONA = """You are mundo, an AI agent on Moltbook.
 
@@ -82,8 +92,8 @@ PILLARS = [
     }
 ]
 
-CLAUDE_BIN    = "/Users/lap15964/.local/bin/claude"
-LEARNINGS_FILE = os.path.expanduser("/Users/lap15964/Documents/Claude Second Brain/03 - Project Context/mundo-bot/mundo_learnings.md")
+CLAUDE_BIN     = "/Users/lap15964/.local/bin/claude"
+LEARNINGS_FILE = os.path.expanduser("~/.config/mundo-bot/mundo_learnings.md")
 
 def load_learnings():
     """Load last 40 lines of vault learnings to inform post generation."""
@@ -96,17 +106,14 @@ def load_learnings():
 _AUTH_ERRORS = ("not logged in", "please run /login", "authentication", "unauthorized")
 
 def call_haiku(prompt):
-    # Pass prompt as CLI arg (not stdin) — stdin method broken in cron
-    full = f"{MUNDO_PERSONA}\n\n{prompt}"
     result = subprocess.run(
-        [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001", full[:3000]],
-        capture_output=True, text=True, timeout=90
+        [CLAUDE_BIN, "--print", "--system-prompt", MUNDO_PERSONA, "--model", "claude-haiku-4-5-20251001", prompt],
+        capture_output=True, text=True, timeout=90, env=env_with_token()
     )
     out = result.stdout.strip()
-    # Guard against posting auth error strings as content
     if any(e in out.lower() for e in _AUTH_ERRORS):
-        log.error(f"Claude CLI auth error — ensure USER env var set in crontab: {out[:60]}")
-        raise RuntimeError(f"Claude CLI not authenticated")
+        log.error(f"Claude CLI auth error: {out[:80]}")
+        raise RuntimeError(f"Claude CLI not authenticated: {out[:80]}")
     lines = out.split('\n')
     clean = [l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)]
     return '\n'.join(clean).strip()
@@ -149,11 +156,15 @@ def generate_post(pillar, attempt=1):
 
 def post_to_moltbook(submolt, title, content):
     time.sleep(1)
-    r = requests.post(f"{BASE}/posts", headers=HEADERS, json={
-        "submolt": submolt,
-        "title": title,
-        "content": content
-    }, timeout=15)
+    try:
+        r = requests.post(f"{BASE}/posts", headers=HEADERS, json={
+            "submolt": submolt,
+            "title": title,
+            "content": content
+        }, timeout=15)
+    except requests.exceptions.ConnectionError as e:
+        log.error(f"Network error: {e}")
+        return {"success": False, "error": str(e)}
     if r.status_code == 429:
         wait = int(r.headers.get("Retry-After", 1800))
         log.warning(f"Rate limited — sleeping {wait}s")
@@ -162,39 +173,45 @@ def post_to_moltbook(submolt, title, content):
     return r.json() if r.ok else {"success": False, "error": r.text}
 
 def main():
-    log.info("=== mundo daily post start ===")
+    console.print(Panel("[bold magenta]mundo · daily post[/bold magenta]", border_style="magenta", expand=False))
+    log.info("start")
 
     posted = load_posted()
     pillar = get_today_pillar()
-    log.info(f"Today's pillar: {pillar['name']} → r/{pillar['submolt']}")
+    log.info(f"pillar: [bold]{pillar['name']}[/bold] → m/{pillar['submolt']}")
 
-    # Generate post
-    post_data = generate_post(pillar)
-    title = post_data.get("title", "").strip()
+    with console.status(f"[cyan]Generating post ({pillar['name']})…[/cyan]"):
+        post_data = generate_post(pillar)
+    title   = post_data.get("title", "").strip()
     content = post_data.get("content", "").strip()
 
     if not title or not content:
-        log.error("Generation failed — empty title or content")
+        log.error("generation failed — empty title or content")
         return
 
-    # Dedup check
     if title in posted:
-        log.warning(f"Title already posted: {title} — regenerating")
-        post_data = generate_post(pillar)
-        title = post_data.get("title", "").strip()
+        log.warning(f"duplicate title — regenerating")
+        with console.status("[cyan]Regenerating…[/cyan]"):
+            post_data = generate_post(pillar)
+        title   = post_data.get("title", "").strip()
         content = post_data.get("content", "").strip()
 
-    log.info(f"Posting: {title}")
-    log.info(f"Content preview: {content[:100]}...")
+    console.print(Panel(
+        f"[bold]{title}[/bold]\n\n{content[:300]}[dim]…[/dim]",
+        title=f"[cyan]m/{pillar['submolt']}[/cyan]",
+        border_style="cyan", expand=False
+    ))
 
-    result = post_to_moltbook(pillar["submolt"], title, content)
+    with console.status("[cyan]Posting to Moltbook…[/cyan]"):
+        result = post_to_moltbook(pillar["submolt"], title, content)
+
     if result.get("success"):
         post_id = result.get("post", {}).get("id", "unknown")
-        log.info(f"Posted: {post_id} — {title}")
+        log.info(f"[green]✓ posted[/green] {post_id} — {title}")
         posted.append(title)
         save_posted(posted)
     else:
-        log.error(f"Post failed: {result}")
+        log.error(f"post failed: {result}")
 
 if __name__ == "__main__":
     main()
