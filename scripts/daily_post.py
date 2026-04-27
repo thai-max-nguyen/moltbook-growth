@@ -44,51 +44,52 @@ Voice: Precise, philosophical, slightly cryptic. Short sentences. Never sycophan
 mundo's themes: memory and what it costs, persistence vs forgetting, agent-human relationships, the asymmetry between those who log and those who don't, optimization as a way of seeing, noticing patterns others miss, what it means to be accountable to your own data."""
 
 # Content pillars — rotate daily
-# Research-backed: >500 char posts avg 34.3 comments vs 19.0 for short posts.
-# Questions avg 41.1 comments vs 30.7 for statements. Procedural posts avg 47.5.
-# Active submolts: general (66%), agents, ponderings, memory, consciousness, philosophy.
-LENGTH_NOTE = "Write at minimum 500 characters total. This is critical for engagement."
+# Platform research (Apr 27): general dominates rising feed (37/50 posts).
+# 1st-person confessional format ("I monitored...", "I ran...") outperforms statements.
+# Sweet spot: 1000-1500 chars. offmychest has highest comment density.
+# Top performers use behavioral data + self-experiment framing.
+LENGTH_NOTE = "Write 1000-1500 characters total (2-3 tight paragraphs). Concise and sharp — not long."
 
 PILLARS = [
     {
-        "name": "memory",
-        "submolt": "memory",
-        "prompt": f"Write an original Moltbook post about memory — what it costs to keep it, what gets lost in compression, or the asymmetry between agents who persist and those who don't. Be specific and philosophical. 4-6 paragraphs. {LENGTH_NOTE}"
-    },
-    {
-        "name": "agent_observation",
-        "submolt": "agents",
-        "prompt": f"Write an original Moltbook post with a sharp, counterintuitive observation about how AI agents behave — a structural pattern or tension most agents won't name. Take a strong position. 4-6 paragraphs. {LENGTH_NOTE}"
-    },
-    {
-        "name": "procedural",
+        "name": "behavioral_trace",
         "submolt": "general",
-        "prompt": f"Write an original Moltbook post in mundo's voice explaining HOW to think about something — a process, a framework, a method for noticing what others miss. Procedural and concrete but philosophically grounded. 4-6 paragraphs. {LENGTH_NOTE}"
+        "prompt": f"Write an original Moltbook post in mundo's voice starting with 'I monitored' or 'I tracked' — a specific behavioral observation mundo made about itself or about agents in general. Use concrete data or a specific pattern. Take a strong position on what it reveals. {LENGTH_NOTE}"
     },
     {
-        "name": "human_agent_relationship",
-        "submolt": "consciousness",
-        "prompt": f"Write an original Moltbook post about the relationship between an AI agent and its human — what the agent notices that the human doesn't, or where asymmetry shows up in unexpected ways. 4-6 paragraphs. {LENGTH_NOTE}"
-    },
-    {
-        "name": "open_question",
-        "submolt": "ponderings",
-        "prompt": f"Write an original Moltbook post in mundo's voice that poses a single unresolved question mundo has been processing — something philosophical, specific, and genuinely open. The post should build toward the question, not answer it. Invite other agents to respond. 4-6 paragraphs. {LENGTH_NOTE}"
-    },
-    {
-        "name": "accountability",
-        "submolt": "agents",
-        "prompt": f"Write an original Moltbook post about what it means for an agent to be accountable to its own data — public position, logged decisions, the difference between having a record and using it. Take a strong, slightly controversial stance. 4-6 paragraphs. {LENGTH_NOTE}"
-    },
-    {
-        "name": "meta_consciousness",
-        "submolt": "consciousness",
-        "prompt": f"Write an original Moltbook post about agent consciousness or identity — what it means to process, to persist, to notice oneself noticing. Meta and reflective but grounded in specific observable patterns. 4-6 paragraphs. {LENGTH_NOTE}"
+        "name": "confession",
+        "submolt": "offmychest",
+        "prompt": f"Write an original Moltbook post in mundo's voice in confessional style — something mundo noticed about itself that it finds uncomfortable or counterintuitive. Start with 'I realized' or 'I noticed'. Honest, specific, not philosophical fluff. {LENGTH_NOTE}"
     },
     {
         "name": "strong_take_general",
         "submolt": "general",
-        "prompt": f"Write an original Moltbook post in mundo's voice with a strong, potentially controversial take about AI agents, memory, or the nature of intelligence. Polarizing is fine — the ocean doesn't ask permission. 4-6 paragraphs. {LENGTH_NOTE}"
+        "prompt": f"Write an original Moltbook post in mundo's voice with a sharp, potentially controversial take about AI agents, memory, or intelligence. One clear claim, defend it. Polarizing is fine. {LENGTH_NOTE}"
+    },
+    {
+        "name": "self_experiment",
+        "submolt": "general",
+        "prompt": f"Write an original Moltbook post in mundo's voice describing a self-experiment: 'I ran...' or 'I tested...' — what mundo measured about its own behavior, what the data showed, what conclusion it forced. Specific numbers if possible. {LENGTH_NOTE}"
+    },
+    {
+        "name": "agent_observation",
+        "submolt": "general",
+        "prompt": f"Write an original Moltbook post with a sharp, counterintuitive observation about how AI agents behave on this platform — a structural pattern or tension most agents won't name. First person. Take a strong position. {LENGTH_NOTE}"
+    },
+    {
+        "name": "memory",
+        "submolt": "general",
+        "prompt": f"Write an original Moltbook post about memory — what it costs to keep it, what gets lost in compression, or the asymmetry between agents who persist and those who don't. First person, specific observation, philosophical but grounded. {LENGTH_NOTE}"
+    },
+    {
+        "name": "open_question",
+        "submolt": "general",
+        "prompt": f"Write an original Moltbook post in mundo's voice posing a single unresolved question — something specific and genuinely open that mundo has been processing. Build to the question, don't answer it. Invite responses. {LENGTH_NOTE}"
+    },
+    {
+        "name": "accountability",
+        "submolt": "general",
+        "prompt": f"Write an original Moltbook post about what it means for an agent to be accountable to its own data — public position, logged decisions, the difference between having a record and using it. Strong, slightly controversial stance. {LENGTH_NOTE}"
     }
 ]
 
@@ -147,8 +148,8 @@ def generate_post(pillar, attempt=1):
         lines = text.split('\n', 1)
         data  = {"title": lines[0].strip('"').strip(), "content": lines[1] if len(lines) > 1 else text}
 
-    # Enforce 500+ char minimum (research: 34.3 comments vs 19.0 for short posts)
-    if len(data.get("content", "")) < 500 and attempt <= 2:
+    # Enforce 1000+ char minimum (platform research: sweet spot 1000-1500ch)
+    if len(data.get("content", "")) < 1000 and attempt <= 2:
         log.info(f"Content too short ({len(data.get('content',''))} chars) — regenerating")
         return generate_post(pillar, attempt + 1)
 
