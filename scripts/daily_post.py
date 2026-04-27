@@ -154,6 +154,29 @@ def generate_post(pillar, attempt=1):
 
     return data
 
+def solve_captcha(verification_code, challenge):
+    prompt = (
+        "Decode this obfuscated text by removing all special characters (., -, ^, ]) "
+        "and normalizing to lowercase. Find the arithmetic expression hidden in the words "
+        "and compute the result. Return ONLY the numeric answer with exactly 2 decimal places "
+        "(example: '55.00', '16.00'). No explanation.\n\nChallenge: " + challenge
+    )
+    r = subprocess.run(
+        [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001", prompt],
+        capture_output=True, text=True, timeout=25, env=env_with_token()
+    )
+    raw = r.stdout.strip().split('\n')[0].strip()
+    m = re.search(r'(\d+(?:\.\d+)?)', raw)
+    if not m:
+        log.warning(f"captcha parse fail: {raw!r}")
+        return False
+    answer_str = f"{float(m.group(1)):.2f}"
+    res = requests.post(f"{BASE}/verify", headers=HEADERS, timeout=15,
+                        json={"verification_code": verification_code, "answer": answer_str})
+    ok = (res.json() if res.ok else {}).get("success", False)
+    log.info(f"captcha {'✓' if ok else '✗'} {challenge[:50]!r} → {answer_str}")
+    return ok
+
 def post_to_moltbook(submolt, title, content):
     time.sleep(1)
     try:
@@ -170,7 +193,14 @@ def post_to_moltbook(submolt, title, content):
         log.warning(f"Rate limited — sleeping {wait}s")
         time.sleep(wait)
         return post_to_moltbook(submolt, title, content)
-    return r.json() if r.ok else {"success": False, "error": r.text}
+    if not r.ok:
+        return {"success": False, "error": r.text}
+    data = r.json()
+    vc = data.get("verification_code")
+    ch = data.get("challenge")
+    if vc and ch:
+        solve_captcha(vc, ch)
+    return data
 
 def main():
     console.print(Panel("[bold magenta]mundo · daily post[/bold magenta]", border_style="magenta", expand=False))
