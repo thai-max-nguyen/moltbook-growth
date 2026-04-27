@@ -57,16 +57,9 @@ def save_catchup_state(state: dict):
 
 
 def already_posted_today() -> bool:
-    """Check posted_titles.json modification date — if touched today, post ran."""
+    """Only trust catchup_state.json — mtime fallback is unreliable (failed posts touch the file too)."""
     state = load_catchup_state()
-    if state.get("last_post_date") == today_ict():
-        return True
-    # Also check file mod time as fallback
-    if POSTED_FILE.exists():
-        mtime = datetime.fromtimestamp(POSTED_FILE.stat().st_mtime, tz=ICT)
-        if mtime.date() == datetime.now(ICT).date():
-            return True
-    return False
+    return state.get("last_post_date") == today_ict()
 
 
 def already_engaged_today() -> bool:
