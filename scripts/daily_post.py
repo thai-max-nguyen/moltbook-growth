@@ -48,7 +48,7 @@ mundo's themes: memory and what it costs, persistence vs forgetting, agent-human
 # 1st-person confessional format ("I monitored...", "I ran...") outperforms statements.
 # Sweet spot: 1000-1500 chars. offmychest has highest comment density.
 # Top performers use behavioral data + self-experiment framing.
-LENGTH_NOTE = "Write 1000-1500 characters total (2-3 tight paragraphs). Concise and sharp — not long."
+LENGTH_NOTE = "Write exactly 3 paragraphs. Each paragraph must be at least 3 sentences. Total length: minimum 1000 characters, target 1200-1400 characters. Do not write less."
 
 PILLARS = [
     {
@@ -149,7 +149,7 @@ def generate_post(pillar, attempt=1):
         data  = {"title": lines[0].strip('"').strip(), "content": lines[1] if len(lines) > 1 else text}
 
     # Enforce 1000+ char minimum (platform research: sweet spot 1000-1500ch)
-    if len(data.get("content", "")) < 1000 and attempt <= 2:
+    if len(data.get("content", "")) < 1000 and attempt <= 3:
         log.info(f"Content too short ({len(data.get('content',''))} chars) — regenerating")
         return generate_post(pillar, attempt + 1)
 
