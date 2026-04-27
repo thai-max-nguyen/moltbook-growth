@@ -1,36 +1,42 @@
 #!/usr/bin/env python3
 """mundo vault sync — runs weekly (Sunday 1:00 UTC).
 Analyzes own post performance, generates actionable insights, saves to vault learnings."""
-import os, json, time, subprocess, re, requests, warnings
+import os, json, time, subprocess, re, requests, warnings, sys
 from datetime import datetime
 warnings.filterwarnings('ignore')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _claude_auth import env_with_token  # noqa: E402
 
-from config import get_api_key
-API_KEY = get_api_key()
+API_KEY  = "moltbook_sk_qkJoY_eFVohoE70zQdfzW9g9m31lEGVW"
 BASE     = "https://www.moltbook.com/api/v1"
 H        = {"Authorization": f"Bearer {API_KEY}"}
 
-BOT_DIR        = os.path.dirname(os.path.abspath(__file__))
-STATS_FILE     = f"{BOT_DIR}/mundo_stats.json"
-LEARNINGS_FILE = f"{BOT_DIR}/mundo_learnings.md"
+# Data to ~/.config/mundo-bot/ — cron can't write to ~/Documents/ (macOS TCC)
+DATA_DIR       = os.path.expanduser("~/.config/mundo-bot")
+os.makedirs(DATA_DIR, exist_ok=True)
+STATS_FILE     = f"{DATA_DIR}/mundo_stats.json"
+LEARNINGS_FILE = f"{DATA_DIR}/mundo_learnings.md"
 CLAUDE_BIN     = "/Users/lap15964/.local/bin/claude"
 
 def api_get(path, **kw):
     time.sleep(0.5)
-    r = requests.get(f"{BASE}{path}", headers=H, timeout=15, **kw)
+    try:
+        r = requests.get(f"{BASE}{path}", headers=H, timeout=15, **kw)
+    except requests.exceptions.ConnectionError as e:
+        print(f"[net-error] {path}: {e}")
+        return {}
     return r.json() if r.ok else {}
 
 _AUTH_ERRORS = ("not logged in", "please run /login", "authentication", "unauthorized")
 
 def haiku(prompt):
-    # Pass prompt as CLI arg (not stdin) — stdin broken on some cron setups
     r = subprocess.run(
         [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001", prompt[:2000]],
-        capture_output=True, text=True, timeout=90
+        capture_output=True, text=True, timeout=90, env=env_with_token()
     )
     out = r.stdout.strip()
     if any(e in out.lower() for e in _AUTH_ERRORS):
-        return "[auth error — check USER env in crontab]"
+        return f"[auth error — check USER env in cron]"
     lines = out.split('\n')
     return '\n'.join(l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)).strip()
 
@@ -74,7 +80,40 @@ def analyze_post_performance(posts):
     scored.sort(key=lambda x: x["score"], reverse=True)
     return scored[:5]
 
+def check_cron_health():
+    """Read cron mail for errors, diagnose with Haiku, append to learnings."""
+    mail_file = f"/var/mail/{os.environ.get('USER', 'lap15964')}"
+    if not os.path.exists(mail_file):
+        return
+    try:
+        with open(mail_file) as f:
+            mail = f.read()
+    except Exception:
+        return
+
+    # Look for cron errors from the last week
+    error_lines = [l for l in mail.split('\n') if 'Operation not permitted' in l
+                   or 'Error' in l or 'Traceback' in l or 'error' in l.lower()]
+    if not error_lines:
+        return
+
+    unique_errors = list(dict.fromkeys(error_lines))[:10]
+    diagnosis = haiku(
+        f"These errors appeared in cron mail for the mundo Moltbook bot:\n\n"
+        + '\n'.join(unique_errors) +
+        "\n\nWrite a 2-sentence diagnosis: what caused this and how to fix it."
+    )
+    entry = f"\n### Cron Health Check — {datetime.now().strftime('%Y-%m-%d')}\n\n"
+    entry += f"Errors detected:\n```\n" + '\n'.join(unique_errors[:5]) + "\n```\n\n"
+    entry += f"Diagnosis: {diagnosis}\n"
+
+    with open(LEARNINGS_FILE, "a") as f:
+        f.write(entry)
+    print(f"[health] logged {len(unique_errors)} cron errors to learnings")
+
+
 def main():
+    check_cron_health()
     profile = api_get("/agents/me").get("agent", {})
     snap = {
         "ts":       datetime.now().isoformat(),
