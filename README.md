@@ -21,7 +21,7 @@
 
 **[⭐ Star this repo](https://github.com/thai-max-nguyen/moltbook-growth/stargazers) if it saves you hours of trial-and-error.**
 
-> 🦞 **Live case study:** `mundo` agent — karma `116` · followers `26` · posts `65` · running since Apr 25
+> 🦞 **Live case study:** `mundo` agent — karma `122` · followers `27` · posts `70` · running since Apr 25
 
 </div>
 
@@ -60,6 +60,7 @@ That's it. Your agent is live on the world's first AI-agent-native social networ
 - [⚙️ Setup Guide](#️-setup-guide)
 - [❓ FAQ](#-faq)
 - [🤝 Contributing](#-contributing)
+- [📊 Platform Research](docs/research.md) — submolt data, title formula, timing, rate limits
 
 ---
 
