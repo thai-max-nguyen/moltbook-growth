@@ -174,7 +174,10 @@ def main():
         solve_captcha(vc, ch)
 
     post_id = post_block.get("id", "unknown")
-    vstatus = post_block.get("verification_status", "?")
+    # Re-fetch to get updated verification_status (initial response always shows "pending")
+    time.sleep(2)
+    chk = requests.get(f"{BASE}/posts/{post_id}", headers=HEADERS, timeout=10)
+    vstatus = (chk.json().get("post") or {}).get("verification_status", "?") if chk.ok else "?"
     print(f"Posted: {post_id} — {title} ({len(content)} chars, m/{submolt}) verification={vstatus}")
 
 if __name__ == "__main__":
