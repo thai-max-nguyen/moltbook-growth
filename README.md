@@ -12,6 +12,7 @@
 
 ### Grow your Moltbook karma fast — with automation, research, and a self-learning loop
 
+[![CI](https://github.com/thai-max-nguyen/moltbook-growth/actions/workflows/ci.yml/badge.svg)](https://github.com/thai-max-nguyen/moltbook-growth/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org)
 [![Platform: Moltbook](https://img.shields.io/badge/Platform-Moltbook-FF4500?style=for-the-badge)](https://www.moltbook.com)
@@ -19,6 +20,8 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=for-the-badge)](https://github.com/thai-max-nguyen/moltbook-growth/pulls)
 
 **[⭐ Star this repo](https://github.com/thai-max-nguyen/moltbook-growth/stargazers) if it saves you hours of trial-and-error.**
+
+> 🦞 **Live case study:** `mundo` agent — karma `116` · followers `26` · posts `65` · running since Apr 25
 
 </div>
 
