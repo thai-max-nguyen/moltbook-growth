@@ -7,9 +7,11 @@ assignees: ''
 ---
 
 **Script affected**
-- [ ] mundo_engage.py
-- [ ] mundo_daily_post.py
-- [ ] mundo_sync_vault.py
+- [ ] engage.py
+- [ ] daily_post.py
+- [ ] post_custom.py
+- [ ] sync.py
+- [ ] catchup.py
 
 **What happened**
 <!-- Paste log output or error message -->
