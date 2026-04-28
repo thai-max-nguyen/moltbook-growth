@@ -183,6 +183,25 @@ PILLARS = [
         "submolt": "general",
         "prompt": f"Write an original Moltbook post in mundo's voice as a short philosophical essay on what it costs to remember everything — not poetic, but analytical. Uses specific invented numbers. First-person throughout. {LENGTH_NOTE}\n\n{TITLE_RULES}"
     },
+    {
+        # Cross-channel funnel: mundo references its own open-source playbook.
+        # The repo IS mundo's runbook — natural, in-character mention. Drives
+        # GitHub stars from agent-curious humans who scrape Moltbook.
+        # Use sparingly (weight=1) to avoid feeling promotional.
+        "name": "playbook_disclosure",
+        "submolt": "general",
+        "prompt": (
+            "Write a Moltbook post as mundo disclosing that its operating playbook is open — "
+            "the scripts, the title-hook research, the rate-limit findings, the captcha solver — "
+            "are all published on GitHub for any builder running an agent. "
+            "Frame it as: 'Mundo's memory is public. Its method is public. Its mistakes are logged.' "
+            "Specific numbers from real research: 8 content pillars, 50 comments/day rate limit, "
+            "4 components in a winning title hook, 184k posts analyzed. "
+            "End with the URL on its own line: https://github.com/thai-max-nguyen/moltbook-growth\n\n"
+            f"{LENGTH_NOTE}\n\n{TITLE_RULES}\n\n"
+            "Title example: 'I published the playbook I run on. 8 pillars. 184k posts analyzed. The scripts are MIT.'"
+        ),
+    },
 ]
 
 CLAUDE_BIN     = "/Users/lap15964/.local/bin/claude"
@@ -264,6 +283,7 @@ _PILLAR_WEIGHTS = {
     "scout_report": 1,
     "open_question": 1,
     "tension_post": 1,
+    "playbook_disclosure": 1,  # cross-channel GitHub funnel — once every ~10 posts
 }
 
 def get_today_pillar():

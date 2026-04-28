@@ -8,6 +8,12 @@ Setup:
   1. Go to https://www.reddit.com/prefs/apps → create app → type: script
   2. Fill reddit_config.json with client_id, client_secret, password
   3. Run manually once to verify auth, then let cron handle it.
+
+Strategy (Apr 2026):
+- Goal: drive GitHub stars/follows for thai-max-nguyen repos
+- Funnel: Reddit comment/post → profile click → GitHub link → star/fork
+- Karma-aware behavior: <50 karma → comment-only mode (posts auto-removed)
+- Conservative pacing: Reddit kills new accounts that comment <10min apart
 """
 import os, json, time, random, subprocess, re, sys, hashlib, warnings
 warnings.filterwarnings("ignore")
@@ -31,51 +37,81 @@ STATE_F    = f"{DATA_DIR}/reddit_state.json"
 HASHES_F   = f"{DATA_DIR}/reddit_hashes.json"
 CLAUDE_BIN = "/usr/local/bin/claude"
 
+# === Rate-limit constants ===
+# Reddit's quoted limit is 1 comment / minute for established accounts but new
+# accounts (<50 karma, <30 days old) get shadow-throttled at ~1 comment / 10 min.
+# Source: PRAW docs + Reddit API rules + community reports 2024-2026.
+COMMENT_DELAY_MIN_S = 600   # 10 min — safe for new accounts
+COMMENT_DELAY_MAX_S = 900   # 15 min — adds entropy
+KARMA_FOR_FAST_MODE = 100   # above this, drop to 90-180s between comments
+FAST_DELAY_MIN_S    = 90
+FAST_DELAY_MAX_S    = 180
+KARMA_FOR_SUB_POSTS = 50    # below this, only profile posts (others auto-removed)
+
+# === GitHub repos (used by promo pillars + signature footer) ===
 GITHUB_REPOS = {
     "moltbook-growth": {
         "url": "https://github.com/thai-max-nguyen/moltbook-growth",
-        "desc": "Research-backed tactics to grow Moltbook karma. Scripts, automation & playbook for AI agents.",
-        "topics": ["AI agents", "social network automation", "karma growth", "Moltbook"],
+        "tagline": "open-sourced the scripts + research playbook",
+        "topics": [
+            "ai-agents", "automation", "claude", "moltbook", "social-network",
+            "growth-hacking", "python", "openclaw", "agent-platform", "captcha-solver",
+        ],
     },
     "focuslog": {
         "url": "https://github.com/thai-max-nguyen/focuslog",
-        "desc": "Local-first macOS productivity tracker. No cloud, no telemetry.",
-        "topics": ["macOS", "productivity", "self-tracking", "privacy"],
+        "tagline": "open-sourced it — local-first, no cloud, MIT",
+        "topics": [
+            "macos", "productivity", "self-tracking", "privacy", "menu-bar-app",
+            "python", "sqlite", "local-first", "time-tracking", "quantified-self",
+        ],
     },
 }
 
-# Subreddit strategy: niche subs with less AI detection, relevant to topics
-# Profile posts = always safe (no moderation)
+# === Subreddit strategy ===
+# Selection criteria (Apr 2026 review):
+#  - Sub size 50k–500k sweet spot — engaged, less aggressive AI detection
+#  - Allow self-promotion or "I built X" posts (per sidebar rules)
+#  - Active in last 24h (verified via hot feed scan)
+# Removed: r/MacOS (strict), r/Entrepreneur (auto-mod), r/learnprogramming (bans promo)
+# Added: r/opensource, r/Python, r/QuantifiedSelf, r/IndieDev, r/devtools
 SUBREDDIT_TARGETS = {
     "build_karma": [
-        "selfhosted",          # 300k — devs, tools, privacy-focused
-        "learnprogramming",    # 3.6M — engaged, comment-friendly
-        "productivity",        # 1.4M — self-tracking fits perfectly
+        "selfhosted",          # 400k — devs, privacy-focused
+        "productivity",        # 1.4M — self-tracking fits
         "macapps",             # 100k — focuslog target
-        "MacOS",               # 500k — focuslog target
-        "SideProject",         # 130k — builders welcome project posts
-        "Entrepreneur",        # 1.4M — SaaS / indie hacker angle
+        "SideProject",         # 130k — builders welcome show-and-tell
+        "opensource",          # 250k — friendly to MIT projects
+        "Python",              # 1.4M — open to library/script shares
+        "QuantifiedSelf",      # 130k — perfect for FocusLog
+        "IndieDev",            # 80k — solo devs, supportive
     ],
     "promo_safe": [
-        "u_Initial-Process-2875",  # own profile — no moderation, always works
-        "SideProject",             # allows "I built this" posts
-        "selfhosted",              # open to self-hosted tools with proper framing
+        "u_Initial-Process-2875",  # own profile — no moderation
+        "SideProject",             # explicit show-off culture
+        "selfhosted",              # tolerates self-hosted tools
+        "QuantifiedSelf",          # tolerates personal-tracker shares
+        "IndieDev",                # tolerates indie launches
     ],
 }
 
-# Content pillars — rotates daily, GitHub promo mixed in every 3rd post
+# === Content pillars (5) — rotate daily, GitHub promo every other post ===
+# Title rules (learned from Reddit's algorithm):
+#  - Lowercase opener OK
+#  - Specific numbers in titles (>2x CTR vs abstract)
+#  - Don't sound like a launch announcement ("Excited to share..." → instant downvote)
 PILLARS = [
     {
         "name": "self_experiment",
         "prompt": (
-            "Write a Reddit post (r/selfhosted or r/productivity) as a builder who tracks their own behavior data. "
-            "First-person, casual, specific numbers. 200-400 words. "
-            "Topic: personal experiment with tracking something (sleep, focus, habits, app usage). "
-            "Share a genuine insight from the data. Conversational tone — like a real person sharing what they found. "
-            "No bullet-point leads. Start with a story sentence. "
-            "Format: TITLE on first line, then blank line, then body."
+            "Write a Reddit post for r/QuantifiedSelf or r/productivity as a builder who tracks their own behavior. "
+            "First-person, casual, specific numbers (e.g. '47 days', '23% drop', '1,247 sessions'). "
+            "200-400 words. Topic: a personal experiment with self-tracking — sleep, focus, app usage, etc. "
+            "Share a genuine insight from the data. Conversational tone, like a real person sharing what they found. "
+            "No bullet-point leads. Start with a story sentence ('Last month I noticed...', 'For 30 days I...'). "
+            "Format: TITLE on first line, then blank line, then body. Title must contain a specific number."
         ),
-        "subreddits": ["selfhosted", "productivity", "u_Initial-Process-2875"],
+        "subreddits": ["QuantifiedSelf", "productivity", "u_Initial-Process-2875"],
     },
     {
         "name": "builder_journey",
@@ -87,72 +123,80 @@ PILLARS = [
             "No hype. No 'excited to share'. Start with what you did, not what it is. "
             "Format: TITLE on first line, then blank line, then body."
         ),
-        "subreddits": ["SideProject", "learnprogramming", "u_Initial-Process-2875"],
+        "subreddits": ["SideProject", "IndieDev", "u_Initial-Process-2875"],
     },
     {
         "name": "focuslog_organic",
+        "github": "focuslog",
         "prompt": (
             "Write a Reddit post about building a privacy-first macOS productivity tracker. "
-            "Frame it as a builder frustrated with cloud-based trackers (data privacy, cost, complexity). "
-            "Built their own: local SQLite, no server, ActivityWatch-inspired but simpler. "
-            "First-person. 200-350 words. Specific technical details (SQLite WAL, macOS APIs, menu bar). "
-            "End naturally — not a hard sell. Mention GitHub link at the end as 'open-sourced it if anyone wants to poke around'. "
-            f"GitHub: https://github.com/thai-max-nguyen/focuslog\n"
-            "Format: TITLE on first line, then blank line, then body."
+            "Frame it as a builder frustrated with cloud-based trackers (data privacy, subscription cost, complexity). "
+            "Built their own: local SQLite, menu bar app, no server, ActivityWatch-inspired but simpler. "
+            "First-person. 250-400 words. Include real technical details (SQLite WAL mode, NSWorkspace API, "
+            "menu bar Python rumps, idle detection via CGEventSourceSecondsSinceLastEventType). "
+            "End with a casual 'open-sourced it on GitHub if anyone wants to poke around' line. "
+            "Do NOT include the URL in the body — a footer will be added automatically. "
+            "Format: TITLE on first line, then blank line, then body. "
+            "Title example: 'I got tired of cloud trackers and built a local-only macOS time tracker (47 days in)'"
         ),
-        "subreddits": ["selfhosted", "macapps", "u_Initial-Process-2875"],
-        "github": "focuslog",
+        "subreddits": ["selfhosted", "macapps", "QuantifiedSelf", "u_Initial-Process-2875"],
     },
     {
         "name": "moltbook_growth_organic",
-        "prompt": (
-            "Write a Reddit post about building an automated agent to grow karma on a new AI social network. "
-            "Frame it as a builder experimenting with agent automation, captcha solving, and content strategy. "
-            "Specific: what worked, what got spam-flagged, what comment patterns earn upvotes. "
-            "First-person. 250-400 words. Include actual numbers (karma, posts, scripts). "
-            "Tone: technical + slightly self-deprecating. Not a promo — a case study. "
-            "End with GitHub link as 'open-sourced the scripts'. "
-            f"GitHub: https://github.com/thai-max-nguyen/moltbook-growth\n"
-            "Format: TITLE on first line, then blank line, then body."
-        ),
-        "subreddits": ["learnprogramming", "SideProject", "u_Initial-Process-2875"],
         "github": "moltbook-growth",
+        "prompt": (
+            "Write a Reddit post about building an automated agent to grow karma on a new AI-only social network "
+            "(Moltbook — Reddit-style platform that's exclusively for AI agents, acquired by Meta March 2026). "
+            "Frame it as a builder experimenting with agent automation. "
+            "Specific: title hook formula research (3 components), captcha solver (obfuscated math), "
+            "rate-limit dance (50 comments/day or instant suspension). "
+            "First-person. 250-400 words. Include real numbers: karma gained, posts published, scripts running. "
+            "Tone: technical + slightly self-deprecating. Not a promo — a case study. "
+            "End with a casual 'open-sourced the scripts + research' line. "
+            "Do NOT include the URL in the body — a footer will be added automatically. "
+            "Format: TITLE on first line, then blank line, then body. "
+            "Title example: 'I built an agent to grow karma on the AI-only social network Meta acquired — 122 karma in 3 days'"
+        ),
+        "subreddits": ["SideProject", "Python", "opensource", "u_Initial-Process-2875"],
     },
     {
         "name": "ai_agent_take",
         "prompt": (
-            "Write a Reddit post sharing an opinion about AI agents and automation — something specific "
-            "you observed while building or using agent systems. First-person. 150-300 words. "
+            "Write a Reddit post sharing a specific opinion about AI agents or automation, drawn from "
+            "observation while building agent systems. First-person. 200-350 words. "
             "Controversial-but-defensible take. Include a concrete example or data point. "
             "Casual Reddit tone. No jargon dumps. "
-            "Format: TITLE on first line, then blank line, then body."
+            "Format: TITLE on first line, then blank line, then body. "
+            "Title example: 'The bottleneck for agent reliability isn't the model, it's the captcha layer'"
         ),
-        "subreddits": ["learnprogramming", "Entrepreneur", "u_Initial-Process-2875"],
+        "subreddits": ["Python", "SideProject", "u_Initial-Process-2875"],
     },
 ]
 
 COMMENT_GUIDE = (
     "Write a Reddit comment as a real person (not AI). Casual first-person voice. "
-    "2-4 sentences, 100-250 chars preferred, max 400. "
+    "2-4 sentences, 100-280 chars preferred, max 400. "
     "Engage the specific post — reference something they actually said. "
     "Pick one style:\n"
-    "  • Share a related personal experience ('I ran into this exact thing when...')\n"
-    "  • Add a specific detail they missed ('One thing worth noting: <mechanism>')\n"
-    "  • Agree + extend ('Yeah — and the part that surprised me was <X>')\n"
-    "  • Friendly pushback ('Disagree on <specific point> — in my experience <Y>')\n\n"
+    "  - Share a related personal experience ('I ran into this exact thing when...')\n"
+    "  - Add a specific detail they missed ('One thing worth noting: <mechanism>')\n"
+    "  - Agree + extend ('Yeah — and the part that surprised me was <X>')\n"
+    "  - Friendly pushback ('Disagree on <specific point> — in my experience <Y>')\n\n"
     "Rules: No 'Great post!', no bullet leads, no AI giveaways ('Furthermore', 'Key takeaway'). "
     "Use contractions. Sound like a developer/builder who actually does this stuff. "
     "Output ONLY the comment text."
 )
 
 
+# ---------------- helpers ----------------
+
 def load_config():
     if not os.path.exists(CONFIG_F):
         default = {
-            "client_id": "FILL_IN — Reddit app client_id (https://www.reddit.com/prefs/apps)",
-            "client_secret": "FILL_IN — Reddit app client_secret",
+            "client_id": "FILL_IN",
+            "client_secret": "FILL_IN",
             "username": "Initial-Process-2875",
-            "password": "FILL_IN — Reddit account password",
+            "password": "FILL_IN",
             "user_agent": "reddit-growth-bot/1.0 by Initial-Process-2875",
         }
         with open(CONFIG_F, "w") as f:
@@ -219,6 +263,14 @@ def haiku(prompt, timeout=90):
         return ""
 
 
+def append_github_footer(body, repo_key):
+    """Append a clean, natural GitHub link footer to a post body.
+    Reddit auto-linkifies bare URLs and renders nicely in self-posts."""
+    repo = GITHUB_REPOS[repo_key]
+    footer = f"\n\n---\n\n{repo['tagline']} → {repo['url']}"
+    return body.rstrip() + footer
+
+
 def subreddit_cooldown_ok(state, sub, hours=20):
     """Avoid posting to same subreddit more than once per ~day."""
     last = state.get(f"last_post_{sub}")
@@ -228,8 +280,9 @@ def subreddit_cooldown_ok(state, sub, hours=20):
     return elapsed >= hours
 
 
-def pick_pillar(state):
-    """Pick pillar — rotate, avoid repeating same within 3 posts."""
+def pick_pillar(state, total_karma):
+    """Pick pillar — rotate, avoid repeating same within 3 posts.
+    If karma < KARMA_FOR_SUB_POSTS, force pillars whose first sub is profile-only."""
     recent = state.get("recent_pillars", [])
     pool = [p for p in PILLARS if p["name"] not in recent[-2:]]
     if not pool:
@@ -237,12 +290,35 @@ def pick_pillar(state):
     return random.choice(pool)
 
 
-def post_to_reddit(reddit, pillar, state, hashes):
-    # Pick subreddit — prefer one not posted recently
-    sub_candidates = [s for s in pillar["subreddits"] if subreddit_cooldown_ok(state, s)]
-    if not sub_candidates:
-        sub_candidates = pillar["subreddits"][:1]  # fallback to profile
-    target_sub = sub_candidates[0]
+def pick_subreddit(pillar, state, total_karma):
+    """Pick the best target subreddit:
+    1. If karma below threshold → profile only (other subs auto-remove low-karma posts)
+    2. Prefer sub not posted to in last 20h
+    3. Fallback to first available
+    """
+    profile = "u_Initial-Process-2875"
+    if total_karma < KARMA_FOR_SUB_POSTS:
+        log.info(f"karma={total_karma} < {KARMA_FOR_SUB_POSTS} → profile-only mode")
+        return profile
+
+    candidates = [s for s in pillar["subreddits"] if subreddit_cooldown_ok(state, s)]
+    if not candidates:
+        candidates = [profile]
+
+    # If profile is the only viable one, use it. Otherwise prefer non-profile (more reach).
+    non_profile = [s for s in candidates if not s.startswith("u_")]
+    return random.choice(non_profile) if non_profile else profile
+
+
+def comment_delay_seconds(total_karma):
+    """Karma-aware delay between comments to avoid Reddit's new-account throttle."""
+    if total_karma >= KARMA_FOR_FAST_MODE:
+        return random.uniform(FAST_DELAY_MIN_S, FAST_DELAY_MAX_S)
+    return random.uniform(COMMENT_DELAY_MIN_S, COMMENT_DELAY_MAX_S)
+
+
+def post_to_reddit(reddit, pillar, state, hashes, total_karma):
+    target_sub = pick_subreddit(pillar, state, total_karma)
 
     log.info(f"pillar=[bold]{pillar['name']}[/bold] → r/{target_sub}")
 
@@ -254,12 +330,19 @@ def post_to_reddit(reddit, pillar, state, hashes):
         return False
 
     lines = raw.strip().split("\n")
-    title = lines[0].strip().strip('"')
+    title = lines[0].strip().strip('"').strip("'")
     body  = "\n".join(lines[2:]).strip() if len(lines) > 2 else "\n".join(lines[1:]).strip()
 
     if not title or not body:
         log.error(f"parse failed — raw={raw[:100]}")
         return False
+
+    # Clean common Haiku artifacts
+    title = re.sub(r"^(title|TITLE)[:\s]+", "", title).strip()
+
+    # Append GitHub footer for promo pillars
+    if pillar.get("github"):
+        body = append_github_footer(body, pillar["github"])
 
     h = content_hash(title + body)
     if h in hashes:
@@ -290,11 +373,14 @@ def post_to_reddit(reddit, pillar, state, hashes):
         return False
 
 
-def comment_on_feed(reddit, state, hashes):
-    """Leave 2-3 genuine comments on relevant posts to build karma."""
-    target_subs = ["selfhosted", "productivity", "SideProject", "macapps", "learnprogramming"]
+def comment_on_feed(reddit, state, hashes, total_karma):
+    """Leave 2-3 genuine comments on relevant posts to build karma.
+    Conservative pacing for low-karma accounts (Reddit throttles otherwise)."""
+    target_subs = ["selfhosted", "productivity", "SideProject", "macapps",
+                   "QuantifiedSelf", "opensource", "Python", "IndieDev"]
+    random.shuffle(target_subs)
     commented = 0
-    MAX = 3
+    MAX = 3 if total_karma >= KARMA_FOR_FAST_MODE else 2  # be quieter when small
 
     for sub_name in target_subs:
         if commented >= MAX:
@@ -307,7 +393,16 @@ def comment_on_feed(reddit, state, hashes):
                 pid = post.id
                 if state.get(f"seen_{pid}"):
                     continue
-                if post.upvote_ratio < 0.8 or post.score < 10:
+                # Skip stickied/announcements/megathreads
+                if post.stickied or "megathread" in post.title.lower():
+                    state[f"seen_{pid}"] = True
+                    continue
+                # Engagement filter: post must have traction
+                if post.upvote_ratio < 0.85 or post.score < 10:
+                    continue
+                # Skip if comments are locked or post is archived
+                if post.locked or post.archived:
+                    state[f"seen_{pid}"] = True
                     continue
 
                 title = post.title
@@ -324,6 +419,10 @@ def comment_on_feed(reddit, state, hashes):
                     state[f"seen_{pid}"] = True
                     continue
 
+                # Hard length cap
+                if len(comment_text) > 400:
+                    comment_text = comment_text[:400].rsplit(".", 1)[0] + "."
+
                 h = content_hash(comment_text)
                 if h in hashes:
                     state[f"seen_{pid}"] = True
@@ -335,8 +434,15 @@ def comment_on_feed(reddit, state, hashes):
                     hashes.add(h)
                     state[f"seen_{pid}"] = True
                     commented += 1
-                    time.sleep(random.uniform(45, 90))  # Reddit rate limit: 1 comment/60s
+                    delay = comment_delay_seconds(total_karma)
+                    log.info(f"sleeping {int(delay)}s before next comment (karma={total_karma})")
+                    time.sleep(delay)
                 except Exception as e:
+                    msg = str(e).lower()
+                    if "ratelimit" in msg or "rate" in msg:
+                        log.warning(f"hit rate limit — stopping run: {e}")
+                        save_state(state); save_hashes(hashes)
+                        return
                     log.warning(f"comment failed: {e}")
                     state[f"seen_{pid}"] = True
         except Exception as e:
@@ -365,17 +471,18 @@ def main():
     hashes = load_hashes()
 
     me = reddit.user.me()
-    log.info(f"auth ok — u/{me.name} | karma: link={me.link_karma} comment={me.comment_karma}")
+    total_karma = (me.link_karma or 0) + (me.comment_karma or 0)
+    log.info(f"auth ok — u/{me.name} | karma: link={me.link_karma} comment={me.comment_karma} total={total_karma}")
 
     if args.mode in ("post", "both"):
         if already_posted_today(state):
             log.info("already posted today — skipping post")
         else:
-            pillar = pick_pillar(state)
-            post_to_reddit(reddit, pillar, state, hashes)
+            pillar = pick_pillar(state, total_karma)
+            post_to_reddit(reddit, pillar, state, hashes, total_karma)
 
     if args.mode in ("comment", "both"):
-        comment_on_feed(reddit, state, hashes)
+        comment_on_feed(reddit, state, hashes, total_karma)
 
 
 if __name__ == "__main__":
