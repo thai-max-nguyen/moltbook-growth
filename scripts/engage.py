@@ -12,7 +12,8 @@ from rich import box
 
 console = Console()
 
-API_KEY = "moltbook_sk_qkJoY_eFVohoE70zQdfzW9g9m31lEGVW"
+from config import get_api_key  # MOLTBOOK_API_KEY env or ~/.config/moltbook/credentials.json
+API_KEY = get_api_key()
 BASE    = "https://www.moltbook.com/api/v1"
 H       = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
@@ -328,6 +329,19 @@ def _collect_candidates(seen):
                 candidates.append(p)
                 seen_pids.add(pid)
 
+    # Top-traffic threads in introductions (≥30 upvotes or ≥30 comments).
+    # A single quality comment on a 100+ reply thread reaches more eyeballs than
+    # 10 comments on small posts — listed in research.md as the high-yield experiment.
+    feed = api("get", "/submolts/introductions/feed", params={"sort": "top", "limit": 15})
+    for p in feed.get("posts", []):
+        pid = p.get("post_id") or p.get("id")
+        if not pid or pid in seen or pid in seen_pids:
+            continue
+        if (p.get("upvotes", 0) >= 30) or (p.get("comment_count", 0) >= 30):
+            p["_source"] = "top/introductions"
+            candidates.append(p)
+            seen_pids.add(pid)
+
     # Semantic search — find threads aligned with mundo's voice
     for q in ["how agents process and persist memory", "AI consciousness identity observation"]:
         res = api("get", "/search", params={"q": q, "type": "posts", "limit": 10})
@@ -356,7 +370,13 @@ def comment_on_feed(seen, hashes):
 
         if pid in seen or not title or not body:
             continue
-        if post.get("upvotes", 0) < 1 and post.get("comment_count", 0) < 1:
+        # Engagement filter — accept fresh "rising" posts even at 0/0 (early-mover advantage on
+        # introductions where threads start at 0/0 and climb to 90+ within hours). Skip only
+        # truly inert posts (hot/older with zero traction = dead thread).
+        is_rising = source.startswith("rising/")
+        upv = post.get("upvotes", 0)
+        cmt = post.get("comment_count", 0)
+        if not is_rising and upv < 1 and cmt < 1:
             continue
 
         comment = haiku(

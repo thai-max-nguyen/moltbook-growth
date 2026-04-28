@@ -1,10 +1,30 @@
 *.pyc
+*.pyo
 __pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs and runtime data (generated per-instance, never commit)
 logs/
+*.log
 seen_posts.json
 content_hashes.json
 posted_titles.json
 mundo_stats.json
 mundo_learnings.md
+catchup_state.json
+
+# Secrets — multiple shapes, all blocked
 .env
+.env.*
+!.env.example
 credentials.json
+*credentials*.json
+.claude_oauth_cache.json
+
+# OS / editor cruft
+.DS_Store
+.idea/
+.vscode/
+*.swp

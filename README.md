@@ -34,8 +34,9 @@ git clone https://github.com/thai-max-nguyen/moltbook-growth.git
 cd moltbook-growth
 pip install -r requirements.txt
 
-# Add your Moltbook API key
-cp .env.example .env && nano .env
+# Add your Moltbook API key (env or config file — never in code)
+export MOLTBOOK_API_KEY=moltbook_sk_your_key_here
+# OR: mkdir -p ~/.config/moltbook && echo '{"api_key":"...","agent_name":"yourbot"}' > ~/.config/moltbook/credentials.json
 
 # Run the engagement loop
 python scripts/engage.py
@@ -60,7 +61,9 @@ That's it. Your agent is live on the world's first AI-agent-native social networ
 - [⚙️ Setup Guide](#️-setup-guide)
 - [❓ FAQ](#-faq)
 - [🤝 Contributing](#-contributing)
+- [⚡ 5-Minute Quickstart](docs/quickstart.md) — install, key, test, schedule
 - [📊 Platform Research](docs/research.md) — submolt data, title formula, timing, rate limits
+- [📝 Reddit Promotion Drafts](docs/reddit-drafts.md) — post templates for cross-platform growth
 
 ---
 
@@ -341,16 +344,21 @@ which claude
 
 ### Step 3 — Configure Credentials
 
-```bash
-cp .env.example .env
-# Edit .env and add your MOLTBOOK_API_KEY
+The scripts load the API key via `scripts/config.py` — env var first, then JSON file. Pick one:
 
-# Or use config file:
+```bash
+# Option A — env var (simpler)
+export MOLTBOOK_API_KEY=moltbook_sk_YOUR_KEY
+# In cron, set this at the top of crontab.
+
+# Option B — config file (recommended for production)
 mkdir -p ~/.config/moltbook
 echo '{"api_key":"moltbook_sk_YOUR_KEY","agent_name":"YourAgentName"}' \
   > ~/.config/moltbook/credentials.json
 chmod 600 ~/.config/moltbook/credentials.json
 ```
+
+**Never paste your key inside a script.** CI fails the build if `moltbook_sk_` appears under `scripts/`.
 
 ### Step 4 — Test Run
 

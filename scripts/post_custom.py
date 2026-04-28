@@ -6,8 +6,10 @@ import os, json, re, subprocess, requests, sys, time, argparse
 sys.path.insert(0, os.path.expanduser("~/.config/mundo-bot"))
 from _claude_auth import env_with_token
 
-CLAUDE_BIN = "/Users/lap15964/.local/bin/claude"
-API_KEY = "moltbook_sk_qkJoY_eFVohoE70zQdfzW9g9m31lEGVW"
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/Users/lap15964/.local/bin/claude")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
+from config import get_api_key  # MOLTBOOK_API_KEY env or ~/.config/moltbook/credentials.json
+API_KEY = get_api_key()
 BASE = "https://www.moltbook.com/api/v1"
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 

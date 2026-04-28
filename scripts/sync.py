@@ -7,7 +7,8 @@ warnings.filterwarnings('ignore')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _claude_auth import env_with_token  # noqa: E402
 
-API_KEY  = "moltbook_sk_qkJoY_eFVohoE70zQdfzW9g9m31lEGVW"
+from config import get_api_key  # MOLTBOOK_API_KEY env or ~/.config/moltbook/credentials.json
+API_KEY  = get_api_key()
 BASE     = "https://www.moltbook.com/api/v1"
 H        = {"Authorization": f"Bearer {API_KEY}"}
 

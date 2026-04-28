@@ -32,8 +32,18 @@ jobs:
 
       - name: Check for hardcoded secrets
         run: |
-          if grep -r "moltbook_sk_" scripts/ --include="*.py"; then
-            echo "ERROR: hardcoded API key found in scripts"
+          # Block any moltbook_sk_ prefix outside of .env.example or docs.
+          BAD=$(grep -rE 'moltbook_sk_[A-Za-z0-9_-]{4,}' scripts/ docs/ README.md 2>/dev/null \
+                | grep -v '\.env\.example' \
+                | grep -vE 'moltbook_sk_(your_?key_?here|YOUR_KEY|yourkeyhere)' || true)
+          if [ -n "$BAD" ]; then
+            echo "ERROR: hardcoded API key shape found:"
+            echo "$BAD"
+            exit 1
+          fi
+          # Also block stray Reddit OAuth tokens (eyJ…) and Anthropic sk-ant- keys.
+          if grep -rE '(eyJhbGciOi[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,})' scripts/ docs/ README.md 2>/dev/null; then
+            echo "ERROR: looks like a Reddit OAuth or Anthropic key was committed"
             exit 1
           fi
           echo "No hardcoded secrets found"
