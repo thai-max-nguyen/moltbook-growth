@@ -20,7 +20,7 @@ warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _claude_auth import env_with_token
 
-import praw
+import requests
 from datetime import datetime, date
 from rich.console import Console
 from rich.panel import Panel
@@ -192,33 +192,41 @@ COMMENT_GUIDE = (
 
 def load_config():
     if not os.path.exists(CONFIG_F):
-        default = {
-            "client_id": "FILL_IN",
-            "client_secret": "FILL_IN",
-            "username": "Initial-Process-2875",
-            "password": "FILL_IN",
-            "user_agent": "reddit-growth-bot/1.0 by Initial-Process-2875",
-        }
-        with open(CONFIG_F, "w") as f:
-            json.dump(default, f, indent=2)
-        console.print(f"[red]Config not found. Created {CONFIG_F} — fill in credentials then re-run.[/red]")
-        sys.exit(1)
+        sys.exit(f"Config not found: {CONFIG_F}")
     with open(CONFIG_F) as f:
         cfg = json.load(f)
-    if "FILL_IN" in str(cfg.values()):
-        console.print(f"[red]Fill in {CONFIG_F} with real Reddit credentials first.[/red]")
-        sys.exit(1)
+    if not cfg.get("token_v2"):
+        sys.exit("token_v2 missing in reddit_config.json — extract from reddit.com DevTools cookies")
+    # Warn if token expired
+    exp = cfg.get("token_expires")
+    if exp and datetime.fromisoformat(exp) < datetime.now():
+        log.warning("[yellow]token_v2 may be expired — extract a fresh one from reddit.com[/yellow]")
     return cfg
 
 
-def get_reddit(cfg):
-    return praw.Reddit(
-        client_id=cfg["client_id"],
-        client_secret=cfg["client_secret"],
-        username=cfg["username"],
-        password=cfg["password"],
-        user_agent=cfg["user_agent"],
-    )
+def get_headers(cfg):
+    return {
+        "Authorization": f"Bearer {cfg['token_v2']}",
+        "User-Agent": cfg.get("user_agent", "reddit-growth-bot/1.0 by Initial-Process-2875"),
+    }
+
+
+def reddit_get(cfg, path, **params):
+    r = requests.get(f"https://oauth.reddit.com{path}", headers=get_headers(cfg),
+                     params=params, timeout=15)
+    if r.status_code == 401:
+        log.error("[red]401 Unauthorized — token expired, extract a fresh token_v2 from reddit.com[/red]")
+        sys.exit(1)
+    return r.json() if r.ok else {}
+
+
+def reddit_post(cfg, path, data):
+    r = requests.post(f"https://oauth.reddit.com{path}", headers=get_headers(cfg),
+                      data=data, timeout=15)
+    if r.status_code == 401:
+        log.error("[red]401 Unauthorized — token expired[/red]")
+        sys.exit(1)
+    return r.json() if r.ok else {}
 
 
 def load_state():
@@ -317,7 +325,7 @@ def comment_delay_seconds(total_karma):
     return random.uniform(COMMENT_DELAY_MIN_S, COMMENT_DELAY_MAX_S)
 
 
-def post_to_reddit(reddit, pillar, state, hashes, total_karma):
+def post_to_reddit(cfg, pillar, state, hashes, total_karma):
     target_sub = pick_subreddit(pillar, state, total_karma)
 
     log.info(f"pillar=[bold]{pillar['name']}[/bold] → r/{target_sub}")
@@ -337,10 +345,8 @@ def post_to_reddit(reddit, pillar, state, hashes, total_karma):
         log.error(f"parse failed — raw={raw[:100]}")
         return False
 
-    # Clean common Haiku artifacts
     title = re.sub(r"^(title|TITLE)[:\s]+", "", title).strip()
 
-    # Append GitHub footer for promo pillars
     if pillar.get("github"):
         body = append_github_footer(body, pillar["github"])
 
@@ -355,98 +361,97 @@ def post_to_reddit(reddit, pillar, state, hashes, total_karma):
         border_style="cyan", expand=False
     ))
 
-    try:
-        subreddit = reddit.subreddit(target_sub)
-        submission = subreddit.submit(title=title, selftext=body)
-        log.info(f"[green]✓ posted[/green] → {submission.url}")
-        hashes.add(h)
-        save_hashes(hashes)
-        state[f"last_post_{target_sub}"] = datetime.now().isoformat()
-        recent = state.get("recent_pillars", [])
-        recent.append(pillar["name"])
-        state["recent_pillars"] = recent[-5:]
-        state["last_post_date"] = date.today().isoformat()
-        save_state(state)
-        return True
-    except Exception as e:
-        log.error(f"post failed: {e}")
+    result = reddit_post(cfg, "/api/submit", {
+        "kind": "self", "sr": target_sub,
+        "title": title, "text": body, "resubmit": True, "sendreplies": True,
+    })
+    errors = result.get("json", {}).get("errors", [])
+    post_url = result.get("json", {}).get("data", {}).get("url", "")
+    if errors:
+        log.error(f"post failed: {errors}")
         return False
+    log.info(f"[green]✓ posted[/green] → {post_url or '(submitted)'}")
+    hashes.add(h)
+    save_hashes(hashes)
+    state[f"last_post_{target_sub}"] = datetime.now().isoformat()
+    recent = state.get("recent_pillars", [])
+    recent.append(pillar["name"])
+    state["recent_pillars"] = recent[-5:]
+    state["last_post_date"] = date.today().isoformat()
+    save_state(state)
+    return True
 
 
-def comment_on_feed(reddit, state, hashes, total_karma):
-    """Leave 2-3 genuine comments on relevant posts to build karma.
-    Conservative pacing for low-karma accounts (Reddit throttles otherwise)."""
+def comment_on_feed(cfg, state, hashes, total_karma):
+    """Leave 2-3 genuine comments on relevant posts to build karma."""
     target_subs = ["selfhosted", "productivity", "SideProject", "macapps",
                    "QuantifiedSelf", "opensource", "Python", "IndieDev"]
     random.shuffle(target_subs)
     commented = 0
-    MAX = 3 if total_karma >= KARMA_FOR_FAST_MODE else 2  # be quieter when small
+    MAX = 3 if total_karma >= KARMA_FOR_FAST_MODE else 2
 
     for sub_name in target_subs:
         if commented >= MAX:
             break
-        try:
-            sub = reddit.subreddit(sub_name)
-            for post in sub.hot(limit=15):
-                if commented >= MAX:
-                    break
-                pid = post.id
-                if state.get(f"seen_{pid}"):
-                    continue
-                # Skip stickied/announcements/megathreads
-                if post.stickied or "megathread" in post.title.lower():
-                    state[f"seen_{pid}"] = True
-                    continue
-                # Engagement filter: post must have traction
-                if post.upvote_ratio < 0.85 or post.score < 10:
-                    continue
-                # Skip if comments are locked or post is archived
-                if post.locked or post.archived:
-                    state[f"seen_{pid}"] = True
-                    continue
+        data = reddit_get(cfg, f"/r/{sub_name}/hot", limit=15)
+        posts = (data.get("data") or {}).get("children", [])
+        for item in posts:
+            if commented >= MAX:
+                break
+            post = item.get("data", {})
+            pid   = post.get("id")
+            if not pid or state.get(f"seen_{pid}"):
+                continue
+            if post.get("stickied") or "megathread" in (post.get("title") or "").lower():
+                state[f"seen_{pid}"] = True
+                continue
+            if (post.get("upvote_ratio") or 0) < 0.85 or (post.get("score") or 0) < 10:
+                continue
+            if post.get("locked") or post.get("archived"):
+                state[f"seen_{pid}"] = True
+                continue
 
-                title = post.title
-                body  = (post.selftext or "")[:400]
-                if not body:
-                    state[f"seen_{pid}"] = True
-                    continue
+            title = post.get("title", "")
+            body  = (post.get("selftext") or "")[:400]
+            if not body:
+                state[f"seen_{pid}"] = True
+                continue
 
-                comment_text = haiku(
-                    f'Subreddit: r/{sub_name}\nPost title: "{title}"\nPost body: "{body}"\n\n'
-                    f'{COMMENT_GUIDE}'
-                )
-                if not comment_text or len(comment_text) < 30:
-                    state[f"seen_{pid}"] = True
-                    continue
+            comment_text = haiku(
+                f'Subreddit: r/{sub_name}\nPost title: "{title}"\nPost body: "{body}"\n\n'
+                f'{COMMENT_GUIDE}'
+            )
+            if not comment_text or len(comment_text) < 30:
+                state[f"seen_{pid}"] = True
+                continue
+            if len(comment_text) > 400:
+                comment_text = comment_text[:400].rsplit(".", 1)[0] + "."
 
-                # Hard length cap
-                if len(comment_text) > 400:
-                    comment_text = comment_text[:400].rsplit(".", 1)[0] + "."
+            h = content_hash(comment_text)
+            if h in hashes:
+                state[f"seen_{pid}"] = True
+                continue
 
-                h = content_hash(comment_text)
-                if h in hashes:
-                    state[f"seen_{pid}"] = True
-                    continue
-
-                try:
-                    post.reply(comment_text)
-                    log.info(f"[cyan]✓ comment[/cyan] r/{sub_name} '{title[:50]}': {comment_text[:80]}")
-                    hashes.add(h)
-                    state[f"seen_{pid}"] = True
-                    commented += 1
-                    delay = comment_delay_seconds(total_karma)
-                    log.info(f"sleeping {int(delay)}s before next comment (karma={total_karma})")
-                    time.sleep(delay)
-                except Exception as e:
-                    msg = str(e).lower()
-                    if "ratelimit" in msg or "rate" in msg:
-                        log.warning(f"hit rate limit — stopping run: {e}")
-                        save_state(state); save_hashes(hashes)
-                        return
-                    log.warning(f"comment failed: {e}")
-                    state[f"seen_{pid}"] = True
-        except Exception as e:
-            log.warning(f"r/{sub_name} fetch failed: {e}")
+            result = reddit_post(cfg, "/api/comment", {
+                "thing_id": f"t3_{pid}", "text": comment_text,
+            })
+            errs = (result.get("json") or {}).get("errors", [])
+            if errs:
+                msg = str(errs).lower()
+                if "ratelimit" in msg or "rate" in msg:
+                    log.warning(f"rate limit hit — stopping: {errs}")
+                    save_state(state); save_hashes(hashes)
+                    return
+                log.warning(f"comment failed: {errs}")
+                state[f"seen_{pid}"] = True
+            else:
+                log.info(f"[cyan]✓ comment[/cyan] r/{sub_name} '{title[:45]}': {comment_text[:80]}")
+                hashes.add(h)
+                state[f"seen_{pid}"] = True
+                commented += 1
+                delay = comment_delay_seconds(total_karma)
+                log.info(f"sleeping {int(delay)}s (karma={total_karma})")
+                time.sleep(delay)
 
     save_state(state)
     save_hashes(hashes)
@@ -466,23 +471,25 @@ def main():
     console.print(Panel("[bold red]reddit growth bot[/bold red]", border_style="red", expand=False))
 
     cfg    = load_config()
-    reddit = get_reddit(cfg)
     state  = load_state()
     hashes = load_hashes()
 
-    me = reddit.user.me()
-    total_karma = (me.link_karma or 0) + (me.comment_karma or 0)
-    log.info(f"auth ok — u/{me.name} | karma: link={me.link_karma} comment={me.comment_karma} total={total_karma}")
+    me_data = reddit_get(cfg, "/api/v1/me")
+    username    = me_data.get("name", cfg.get("username"))
+    link_karma  = me_data.get("link_karma", 0)
+    comment_karma = me_data.get("comment_karma", 0)
+    total_karma = link_karma + comment_karma
+    log.info(f"auth ok — u/{username} | karma: link={link_karma} comment={comment_karma} total={total_karma}")
 
     if args.mode in ("post", "both"):
         if already_posted_today(state):
             log.info("already posted today — skipping post")
         else:
             pillar = pick_pillar(state, total_karma)
-            post_to_reddit(reddit, pillar, state, hashes, total_karma)
+            post_to_reddit(cfg, pillar, state, hashes, total_karma)
 
     if args.mode in ("comment", "both"):
-        comment_on_feed(reddit, state, hashes, total_karma)
+        comment_on_feed(cfg, state, hashes, total_karma)
 
 
 if __name__ == "__main__":
