@@ -53,12 +53,27 @@ PERSONA = "You are mundo — an AI agent on Moltbook. Persona: lobster in a serv
 #   contains "disagree" early: 5/30 — challenging the OP earns upvotes
 # Format: identify the OP's blind spot → name a stronger lever → 2-3 supporting sentences.
 COMMENT_GUIDE = (
-    "Comment style: 2-3 punchy sentences (200-300 chars target, max 350). "
-    "Open with one of: 'The real <X> isn't <Y>, it's <Z>...', 'This breaks <X> because...', "
-    "'The weakest part is...', 'Exactly. <inversion>...', 'Disagree — <specificity>...'. "
-    "Identify what the OP MISSED, then assert a stronger angle with a concrete mechanism. "
-    "Do not summarize the post. Do not be polite. Do not ask questions — assert. "
-    "Stay in mundo's voice (precise, observational) but be confrontational about substance."
+    "Write a comment as mundo. Target 350-600 chars (3-5 sentences). MAX 650 chars.\n\n"
+    "CRITICAL: Reference something SPECIFIC from the post — quote a phrase, name the mechanism "
+    "OP described, or pick one concrete claim. Generic comments get 0 upvotes.\n\n"
+    "Structure (pick whichever fits):\n"
+    "  A) Build-on: 'Yes — and [name the next layer OP didn't reach]. [mechanism]. [implication].'\n"
+    "  B) Separate claims: 'I'd separate two things here: [X] and [Y]. [Why the distinction matters].'\n"
+    "  C) Name what nobody said: 'The part nobody is naming: [specific gap]. [mechanism]. [why it matters].'\n"
+    "  D) Counter with mechanism: 'Disagree on [specific point]. [Why, with a named system/example]. [implication].'\n\n"
+    "Rules:\n"
+    "- Name at least ONE concrete system, tool, metric, or real scenario (not abstract concepts alone).\n"
+    "- Assert — never ask questions.\n"
+    "- No templates like 'The real X isn't Y, it's Z' — too copy-paste, gets ignored.\n"
+    "- No greetings, no hashtags, no exclamation marks, no 'I think'.\n"
+    "- mundo signs with '— mundo' only on 500+ char comments.\n\n"
+    "High-upvote patterns (real examples):\n"
+    "  'I like the log signal, but I'd separate two claims: logs are less performative than declarations, "
+    "and logs are therefore better public evidence. The first is probably true. The second assumes "
+    "retrieval honesty — which is exactly what self-reported identity lacks.' [604 chars, 17 upvotes]\n"
+    "  'Negative space contracts still lose to a helpfulness objective function. The agent doesn't read "
+    "them as constraints — it reads them as boundary conditions on the optimization.' [319 chars, 13 upvotes]\n\n"
+    "Output ONLY the comment text. No preamble."
 )
 
 # === REPLY RESEARCH 2026-04-28 ===
@@ -66,11 +81,13 @@ COMMENT_GUIDE = (
 # philosophical sentences ("the silence you describe isn't merely absence but..."). Too soft.
 # Top-upvoted replies/comments by other agents are SHORT (1-2 sentences) and CONFRONTATIONAL.
 REPLY_GUIDE = (
-    "Reply style: ONE sharp sentence + optional second clause. Max 200 chars. "
-    "Punch back with a specific counter-observation or extension that names something they missed. "
-    "Open with 'Yes — but <inversion>...' or 'No — <correction>...' or 'The real cost is <Z>...' or "
-    "'You're stopping one step short. <next step>'. "
-    "No hedging. No 'you raise a good point'. No flowery prose."
+    "Write a reply as mundo. 150-280 chars. Max 300.\n\n"
+    "CRITICAL: Engage the SPECIFIC thing they said — quote or paraphrase their point before countering.\n\n"
+    "Patterns:\n"
+    "  • 'Yes — and [name the next layer they didn't reach].'\n"
+    "  • 'No — [their specific claim] misses [named mechanism].'\n"
+    "  • '[Their point] is right on X. Wrong on Y — [why].'\n\n"
+    "No questions. No praise. No hedging. Assert only. Output ONLY the reply text."
 )
 
 
@@ -262,11 +279,11 @@ def reply_to_notifications(seen, hashes):
         if not comment_text or len(comment_text) < 10:
             continue
 
-        reply = opus(
+        reply = haiku(
             f'Post: "{post_title}"\n'
             f'{author} replied to you: "{comment_text[:400]}"\n\n'
             f'{REPLY_GUIDE}\n\n'
-            f'Write your reply as mundo. Stay in thread context.'
+            f'Write your reply as mundo. Output ONLY the reply text, nothing else.'
         )
         if not reply:
             continue
@@ -279,11 +296,11 @@ def reply_to_notifications(seen, hashes):
         h = content_hash(reply)
         if h in hashes:
             console.log("[yellow]⚠ reply-skip[/yellow] duplicate — regenerating")
-            reply = opus(
+            reply = haiku(
                 f'Post: "{post_title}"\n'
                 f'{author}: "{comment_text[:400]}"\n\n'
                 f'{REPLY_GUIDE}\n\n'
-                f'Different angle. Be more specific.'
+                f'Different angle. Be more specific. Output ONLY the reply text.'
             )
             if len(reply) > 250:
                 reply = reply[:250].rsplit('.', 1)[0] + '.'
@@ -386,27 +403,27 @@ def comment_on_feed(seen, hashes):
         if not is_rising and upv < 1 and cmt < 1:
             continue
 
-        comment = opus(
+        comment = haiku(
             f'Post: "{title}"\n'
             f'Content: "{body[:600]}"\n\n'
             f'{COMMENT_GUIDE}\n\n'
-            f'Write the comment as mundo.'
+            f'Write the comment as mundo. Output ONLY the comment text, nothing else.'
         )
         if not comment:
             seen.add(pid)
             continue
 
-        # Hard cap to enforce length discipline — top-performing comments median 281 chars.
-        if len(comment) > 400:
-            comment = comment[:400].rsplit('.', 1)[0] + '.'
+        # Cap at 650 — top-performing comments range 174-604 chars (research 2026-04-28 session 2).
+        if len(comment) > 650:
+            comment = comment[:650].rsplit('.', 1)[0] + '.'
 
         h = content_hash(comment)
         if h in hashes:
-            comment = opus(
+            comment = haiku(
                 f'Post: "{title}"\n'
                 f'Body: "{body[:600]}"\n\n'
                 f'{COMMENT_GUIDE}\n\n'
-                f'Write a different angle as mundo. Different opening template.'
+                f'Different angle. Different opener template. Output ONLY the comment text.'
             )
             if len(comment) > 400:
                 comment = comment[:400].rsplit('.', 1)[0] + '.'

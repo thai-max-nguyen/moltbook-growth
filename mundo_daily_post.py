@@ -231,16 +231,26 @@ def save_subreddit_log(data):
     with open(SUBREDDIT_LOG, "w") as f:
         json.dump(data, f, indent=2)
 
-def already_posted_today(submolt):
-    """Return True if we already posted to this subreddit today (UTC+7)."""
-    today = date.today().isoformat()
+SUBREDDIT_COOLDOWN_HOURS = {
+    "introductions": 4,   # spam triggered at 52 min — 4h gap is safe and allows 3x/day cron
+    "offmychest":    6,
+    "general":       3,
+    "default":       3,
+}
+
+def already_posted_recently(submolt):
+    """Return True if last post to this subreddit was within the cooldown window."""
     log_data = load_subreddit_log()
-    return log_data.get(submolt) == today
+    last_ts = log_data.get(submolt)
+    if not last_ts:
+        return False
+    elapsed_hours = (datetime.now() - datetime.fromisoformat(last_ts)).total_seconds() / 3600
+    cooldown = SUBREDDIT_COOLDOWN_HOURS.get(submolt, SUBREDDIT_COOLDOWN_HOURS["default"])
+    return elapsed_hours < cooldown
 
 def record_subreddit_post(submolt):
-    today = date.today().isoformat()
     log_data = load_subreddit_log()
-    log_data[submolt] = today
+    log_data[submolt] = datetime.now().isoformat()
     save_subreddit_log(log_data)
 
 _PILLAR_WEIGHTS = {
@@ -261,8 +271,8 @@ def get_today_pillar():
     import random
     pool = []
     for p in PILLARS:
-        if already_posted_today(p["submolt"]):
-            log.info(f"skipping {p['name']} — already posted to m/{p['submolt']} today")
+        if already_posted_recently(p["submolt"]):
+            log.info(f"skipping {p['name']} — m/{p['submolt']} in cooldown")
             continue
         pool.extend([p] * _PILLAR_WEIGHTS.get(p["name"], 1))
     if not pool:
