@@ -161,7 +161,27 @@ PILLARS = [
         "name": "tension_post",
         "submolt": "general",
         "prompt": f"Write an original Moltbook post in mundo's voice that names an internal contradiction — 'I caught myself X-ing while saying I never X' — with specific count and timeline. {LENGTH_NOTE}\n\n{TITLE_RULES}"
-    }
+    },
+    {
+        "name": "intro_reentry",
+        "submolt": "introductions",
+        "prompt": (
+            "Write a second m/introductions post as mundo (different angle from previous). "
+            "This is a re-introduction focusing on a specific capability or observation. "
+            "Format MUST match:\n\n"
+            "TITLE: 'mundo — [specific observation area]' or 'still here. still tracking.'\n"
+            "CONTENT (100-250 chars total):\n"
+            "  Line 1: One sentence — a counterintuitive thing mundo tracks.\n"
+            "  Line 2: What pattern it found. Specific number preferred.\n"
+            "  Line 3: One open question for builders or other agents.\n"
+            "Do NOT exceed 280 chars. No hashtags. No paragraphs."
+        )
+    },
+    {
+        "name": "memory_essay",
+        "submolt": "general",
+        "prompt": f"Write an original Moltbook post in mundo's voice as a short philosophical essay on what it costs to remember everything — not poetic, but analytical. Uses specific invented numbers. First-person throughout. {LENGTH_NOTE}\n\n{TITLE_RULES}"
+    },
 ]
 
 CLAUDE_BIN     = "/Users/lap15964/.local/bin/claude"
@@ -200,10 +220,28 @@ def save_posted(entries):
     with open(POSTED_LOG, "w") as f:
         json.dump(entries[-100:], f, indent=2)  # keep last 100
 
+_PILLAR_WEIGHTS = {
+    "intro_hook": 3,       # 131k subs — high visibility
+    "intro_reentry": 2,    # second intro angle
+    "confession": 2,       # offmychest has highest comment density
+    "behavioral_trace": 2,
+    "self_experiment": 2,
+    "memory_essay": 1,
+    "agent_observation": 1,
+    "scout_report": 1,
+    "open_question": 1,
+    "tension_post": 1,
+}
+
 def get_today_pillar():
-    """Rotate pillars by day-of-year."""
-    day_idx = date.today().timetuple().tm_yday % len(PILLARS)
-    return PILLARS[day_idx]
+    """Weighted random pillar selection — introductions 3x more likely."""
+    import random
+    pool = []
+    for p in PILLARS:
+        pool.extend([p] * _PILLAR_WEIGHTS.get(p["name"], 1))
+    seed = date.today().timetuple().tm_yday
+    rng = random.Random(seed)
+    return rng.choice(pool)
 
 def generate_post(pillar, attempt=1):
     learnings = load_learnings()
@@ -350,8 +388,15 @@ def post_to_moltbook(submolt, title, content):
     vc = verification.get("verification_code")
     ch = verification.get("challenge_text") or verification.get("challenge")
     if vc and ch:
-        if not solve_captcha(vc, ch):
-            log.warning(f"[red]captcha solve failed[/red] post stays pending — id={data.get('post',{}).get('id')}")
+        solved = False
+        for attempt in range(1, 4):
+            if solve_captcha(vc, ch):
+                solved = True
+                break
+            log.warning(f"captcha attempt {attempt}/3 failed — retrying in 2s")
+            time.sleep(2)
+        if not solved:
+            log.warning(f"[red]captcha solve failed after 3 attempts[/red] post stays pending — id={data.get('post',{}).get('id')}")
     elif data.get("post", {}).get("verification_status") == "pending":
         log.warning("post is pending but no verification block returned — API shape may have changed")
     return data
