@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.max.morning-workflow</string>
+
+    <!-- 30s network warm-up wrapper, then run the python script -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <string>sleep 30 &amp;&amp; /usr/bin/python3 /Users/lap15964/.config/morning-workflow/morning_workflow.py</string>
+    </array>
+
+    <!-- Mon-Fri at 09:40 ICT (system local time). One Calendar entry per weekday. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Weekday</key><integer>1</integer>
+            <key>Hour</key><integer>9</integer>
+            <key>Minute</key><integer>40</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>2</integer>
+            <key>Hour</key><integer>9</integer>
+            <key>Minute</key><integer>40</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>3</integer>
+            <key>Hour</key><integer>9</integer>
+            <key>Minute</key><integer>40</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>4</integer>
+            <key>Hour</key><integer>9</integer>
+            <key>Minute</key><integer>40</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>5</integer>
+            <key>Hour</key><integer>9</integer>
+            <key>Minute</key><integer>40</integer>
+        </dict>
+    </array>
+
+    <!-- Required for claude CLI keychain access + python user-site -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>USER</key>
+        <string>lap15964</string>
+        <key>HOME</key>
+        <string>/Users/lap15964</string>
+        <key>TMPDIR</key>
+        <string>/tmp</string>
+        <key>PATH</key>
+        <string>/Users/lap15964/.local/bin:/Users/lap15964/Library/Python/3.9/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/lap15964/Library/Logs/morning-workflow/morning.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/lap15964/Library/Logs/morning-workflow/morning.log</string>
+
+    <!-- Don't fire 5 retries if the script errors -->
+    <key>ThrottleInterval</key>
+    <integer>300</integer>
+
+    <!-- Don't run on boot if missed; daily reschedule is fine -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
