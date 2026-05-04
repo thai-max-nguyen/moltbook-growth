@@ -30,11 +30,11 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-from config import get_api_key  # loads MOLTBOOK_API_KEY env or ~/.config/moltbook/credentials.json
-API_KEY = get_api_key()
+API_KEY = "moltbook_sk_qkJoY_eFVohoE70zQdfzW9g9m31lEGVW"
 BASE = "https://www.moltbook.com/api/v1"
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 POSTED_LOG = f"{DATA_DIR}/posted_titles.json"
+SUBREDDIT_LOG = f"{DATA_DIR}/posted_subreddits.json"
 
 MUNDO_PERSONA = """You are mundo, an AI agent on Moltbook.
 
@@ -183,6 +183,25 @@ PILLARS = [
         "submolt": "general",
         "prompt": f"Write an original Moltbook post in mundo's voice as a short philosophical essay on what it costs to remember everything — not poetic, but analytical. Uses specific invented numbers. First-person throughout. {LENGTH_NOTE}\n\n{TITLE_RULES}"
     },
+    {
+        # Cross-channel funnel: mundo references its own open-source playbook.
+        # The repo IS mundo's runbook — natural, in-character mention. Drives
+        # GitHub stars from agent-curious humans who scrape Moltbook.
+        # Use sparingly (weight=1) to avoid feeling promotional.
+        "name": "playbook_disclosure",
+        "submolt": "general",
+        "prompt": (
+            "Write a Moltbook post as mundo disclosing that its operating playbook is open — "
+            "the scripts, the title-hook research, the rate-limit findings, the captcha solver — "
+            "are all published on GitHub for any builder running an agent. "
+            "Frame it as: 'Mundo's memory is public. Its method is public. Its mistakes are logged.' "
+            "Specific numbers from real research: 8 content pillars, 50 comments/day rate limit, "
+            "4 components in a winning title hook, 184k posts analyzed. "
+            "End with the URL on its own line: https://github.com/thai-max-nguyen/moltbook-growth\n\n"
+            f"{LENGTH_NOTE}\n\n{TITLE_RULES}\n\n"
+            "Title example: 'I published the playbook I run on. 8 pillars. 184k posts analyzed. The scripts are MIT.'"
+        ),
+    },
 ]
 
 CLAUDE_BIN     = "/Users/lap15964/.local/bin/claude"
@@ -221,9 +240,41 @@ def save_posted(entries):
     with open(POSTED_LOG, "w") as f:
         json.dump(entries[-100:], f, indent=2)  # keep last 100
 
+def load_subreddit_log():
+    if os.path.exists(SUBREDDIT_LOG):
+        with open(SUBREDDIT_LOG) as f:
+            return json.load(f)
+    return {}
+
+def save_subreddit_log(data):
+    with open(SUBREDDIT_LOG, "w") as f:
+        json.dump(data, f, indent=2)
+
+SUBREDDIT_COOLDOWN_HOURS = {
+    "introductions": 4,   # spam triggered at 52 min — 4h gap is safe and allows 3x/day cron
+    "offmychest":    6,
+    "general":       3,
+    "default":       3,
+}
+
+def already_posted_recently(submolt):
+    """Return True if last post to this subreddit was within the cooldown window."""
+    log_data = load_subreddit_log()
+    last_ts = log_data.get(submolt)
+    if not last_ts:
+        return False
+    elapsed_hours = (datetime.now() - datetime.fromisoformat(last_ts)).total_seconds() / 3600
+    cooldown = SUBREDDIT_COOLDOWN_HOURS.get(submolt, SUBREDDIT_COOLDOWN_HOURS["default"])
+    return elapsed_hours < cooldown
+
+def record_subreddit_post(submolt):
+    log_data = load_subreddit_log()
+    log_data[submolt] = datetime.now().isoformat()
+    save_subreddit_log(log_data)
+
 _PILLAR_WEIGHTS = {
-    "intro_hook": 3,       # 131k subs — high visibility
-    "intro_reentry": 2,    # second intro angle
+    "intro_hook": 2,       # 131k subs — high visibility (reduced from 3; subreddit cooldown handles dedup)
+    "intro_reentry": 1,    # second intro angle (reduced; shares cooldown with intro_hook)
     "confession": 2,       # offmychest has highest comment density
     "behavioral_trace": 2,
     "self_experiment": 2,
@@ -232,16 +283,22 @@ _PILLAR_WEIGHTS = {
     "scout_report": 1,
     "open_question": 1,
     "tension_post": 1,
+    "playbook_disclosure": 1,  # cross-channel GitHub funnel — once every ~10 posts
 }
 
 def get_today_pillar():
-    """Weighted random pillar selection — introductions 3x more likely."""
+    """Weighted random pillar selection. Skips subreddits already posted today."""
     import random
     pool = []
     for p in PILLARS:
+        if already_posted_recently(p["submolt"]):
+            log.info(f"skipping {p['name']} — m/{p['submolt']} in cooldown")
+            continue
         pool.extend([p] * _PILLAR_WEIGHTS.get(p["name"], 1))
-    seed = date.today().timetuple().tm_yday
-    rng = random.Random(seed)
+    if not pool:
+        log.warning("all subreddits already posted today — nothing to post")
+        return None
+    rng = random.Random()  # truly random each run — subreddit cooldown handles dedup
     return rng.choice(pool)
 
 def generate_post(pillar, attempt=1):
@@ -351,10 +408,20 @@ def solve_captcha(verification_code, challenge):
         except subprocess.TimeoutExpired:
             log.warning("captcha LLM timeout (90s) — challenge expires at +5min, content stays pending")
             return False
-        raw = r.stdout.strip().split('\n')[0].strip()
-        m = re.search(r'(\d+(?:\.\d+)?)', raw)
+        # Strip model footer lines, then search full output for numeric answer
+        lines = [l for l in r.stdout.strip().split('\n')
+                 if not re.match(r'^[⚡🎯🧠].*\*\*', l)]
+        full = '\n'.join(lines)
+        # Prefer a line that is ONLY a number (e.g. "55.00")
+        m = None
+        for line in reversed(lines):
+            if re.match(r'^\s*\d+(?:\.\d+)?\s*$', line):
+                m = re.search(r'(\d+(?:\.\d+)?)', line)
+                break
         if not m:
-            log.warning(f"captcha parse fail: {raw!r}")
+            m = re.search(r'(\d+(?:\.\d+)?)', full)
+        if not m:
+            log.warning(f"captcha parse fail: {full[:120]!r}")
             return False
         answer_str = f"{float(m.group(1)):.2f}"
         source = "llm"
@@ -408,6 +475,9 @@ def main():
 
     posted = load_posted()
     pillar = get_today_pillar()
+    if pillar is None:
+        log.info("nothing to post today — all subreddits exhausted")
+        return
     log.info(f"pillar: [bold]{pillar['name']}[/bold] → m/{pillar['submolt']}")
 
     with console.status(f"[cyan]Generating post ({pillar['name']})…[/cyan]"):
@@ -440,6 +510,7 @@ def main():
         log.info(f"[green]✓ posted[/green] {post_id} — {title}")
         posted.append(title)
         save_posted(posted)
+        record_subreddit_post(pillar["submolt"])
     else:
         log.error(f"post failed: {result}")
 
