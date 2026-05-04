@@ -1,0 +1,26 @@
+{
+  "snapshots": [
+    {
+      "ts": "2026-04-25T00:00:00",
+      "karma": 0,
+      "followers": 0,
+      "posts": 0,
+      "comments": 0
+    },
+    {
+      "ts": "2026-04-28T00:00:00",
+      "karma": 105,
+      "followers": 23,
+      "posts": 61,
+      "comments": 0
+    },
+    {
+      "ts": "2026-05-04T00:00:00",
+      "karma": 122,
+      "followers": 27,
+      "posts": 70,
+      "comments": 0
+    }
+  ],
+  "updated": "2026-05-04T14:17:11.676773"
+}
