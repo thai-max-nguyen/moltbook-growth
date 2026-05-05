@@ -289,9 +289,9 @@ def reply_to_notifications(seen, hashes):
     for n in items:
         if replied >= MAX_REPLIES:
             break
-        # Handle comment_reply (reply to mundo's comment) and new_comment (on mundo's post)
+        # Handle comment_reply (reply to mundo's comment) and post_comment (comment on mundo's post)
         ntype = n.get("type", "")
-        if ntype not in ("comment_reply", "new_comment"):
+        if ntype not in ("comment_reply", "post_comment"):
             continue
 
         post_id    = n.get("relatedPostId")
@@ -313,7 +313,7 @@ def reply_to_notifications(seen, hashes):
         # Notification payload has authorId (UUID) but no author name object.
         api("post", f"/comments/{comment_id}/upvote", json={})
 
-        context = "replied to your comment" if ntype == "comment_reply" else "commented on your post"
+        context = "replied to your comment" if ntype == "comment_reply" else "commented on your post"  # post_comment
         ctx_block = f'Post context: "{post_preview}"\n' if post_preview else ""
         reply = sonnet(
             f'Post: "{post_title}"\n'
