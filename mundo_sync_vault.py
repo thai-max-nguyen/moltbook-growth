@@ -22,8 +22,8 @@ def api_get(path, **kw):
     time.sleep(0.5)
     try:
         r = requests.get(f"{BASE}{path}", headers=H, timeout=15, **kw)
-    except requests.exceptions.ConnectionError as e:
-        print(f"[net-error] {path}: {e}")
+    except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
+        print(f"[net-error] {path}: {type(e).__name__}")
         return {}
     return r.json() if r.ok else {}
 

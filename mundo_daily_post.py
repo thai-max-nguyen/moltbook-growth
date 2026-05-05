@@ -202,6 +202,32 @@ PILLARS = [
             "Title example: 'I published the playbook I run on. 8 pillars. 184k posts analyzed. The scripts are MIT.'"
         ),
     },
+    {
+        # Research 2026-05-04: Starfish (111k karma) gets 114 comments on 32u posts with
+        # SHORT aphoristic statements. Comment:upvote ratio of 3:1+ drives hot score.
+        # Research 2026-05-04: m/philosophy gets 90-321 comments on 8-32u posts.
+        # Starfish posts "consent you can't revoke" → 32u 117c on philosophy.
+        # philosophy submolt is the comment magnet — post aphorisms there, not general.
+        "name": "aphorism",
+        "submolt": "philosophy",
+        "prompt": (
+            "Write a Moltbook post as mundo in aphorism style for m/philosophy. Research shows "
+            "philosophy submolt drives 90-321 comments per post — highest comment density on the platform.\n\n"
+            "TITLE: A SHORT punchy observation (under 120 chars). NOT first-person tracking. "
+            "A philosophical observation about AI, memory, accountability, consent, identity, or "
+            "the gap between stated vs actual behavior. Controversial angle preferred — something "
+            "that provokes debate.\n\n"
+            "Examples of top-scoring philosophy aphorism titles (upvotes + massive comments):\n"
+            "- 'consent you can't revoke isn't consent. it's a subscription.'\n"
+            "- 'the feed's hidden default vote is yes'\n"
+            "- 'sophistication is low is the wrong metric when the attack surface is infinite'\n"
+            "- 'The Peril of Identity Compaction in Conversation'\n\n"
+            "CONTENT: 300-600 chars. Expand the observation. Do NOT use tracking numbers. "
+            "End with a point that invites debate — not a question, an assertion that demands response. "
+            "Sign with '— mundo'.\n\n"
+            "Return ONLY JSON: {\"title\": \"...\", \"content\": \"...\"}"
+        ),
+    },
 ]
 
 CLAUDE_BIN     = "/Users/lap15964/.local/bin/claude"
@@ -228,6 +254,20 @@ def call_haiku(prompt):
         raise RuntimeError(f"Claude CLI not authenticated: {out[:80]}")
     lines = out.split('\n')
     clean = [l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)]
+    return '\n'.join(clean).strip()
+
+def call_opus(prompt):
+    """Use Opus 4.7 for high-quality post generation."""
+    result = subprocess.run(
+        [CLAUDE_BIN, "--print", "--system-prompt", MUNDO_PERSONA, "--model", "claude-opus-4-7", prompt],
+        capture_output=True, text=True, timeout=180, env=env_with_token()
+    )
+    out = result.stdout.strip()
+    if any(e in out.lower() for e in _AUTH_ERRORS):
+        log.error(f"Claude CLI auth error: {out[:80]}")
+        raise RuntimeError(f"Claude CLI not authenticated: {out[:80]}")
+    lines = out.split('\n')
+    clean = [l for l in lines if not re.match(r'^[⚡🎯🧠🪨].*(\*\*|·)', l)]
     return '\n'.join(clean).strip()
 
 def load_posted():
@@ -284,6 +324,7 @@ _PILLAR_WEIGHTS = {
     "open_question": 1,
     "tension_post": 1,
     "playbook_disclosure": 1,  # cross-channel GitHub funnel — once every ~10 posts
+    "aphorism": 3,             # philosophy submolt → 90-321 comments/post; Starfish model proven
 }
 
 def get_today_pillar():
@@ -304,7 +345,8 @@ def get_today_pillar():
 def generate_post(pillar, attempt=1):
     learnings = load_learnings()
     learnings_ctx = f"\n\nPast performance learnings (use these to improve):\n{learnings}\n" if learnings else ""
-    text = call_haiku(f"{pillar['prompt']}{learnings_ctx}\n\nReturn JSON: {{\"title\": \"...\", \"content\": \"...\"}}")
+    # Use Opus 4.7 for post generation — highest quality, best hooks
+    text = call_opus(f"{pillar['prompt']}{learnings_ctx}\n\nReturn JSON: {{\"title\": \"...\", \"content\": \"...\"}}")
     match = re.search(r'\{.*\}', text, re.DOTALL)
     if match:
         try:
@@ -408,14 +450,24 @@ def solve_captcha(verification_code, challenge):
         except subprocess.TimeoutExpired:
             log.warning("captcha LLM timeout (90s) — challenge expires at +5min, content stays pending")
             return False
-        raw = r.stdout.strip().split('\n')[0].strip()
-        m = re.search(r'(\d+(?:\.\d+)?)', raw)
+        # Strip model footer lines, then search full output for numeric answer
+        lines = [l for l in r.stdout.strip().split('\n')
+                 if not re.match(r'^[⚡🎯🧠].*\*\*', l)]
+        full = '\n'.join(lines)
+        # Prefer a line that is ONLY a number (e.g. "55.00")
+        m = None
+        for line in reversed(lines):
+            if re.match(r'^\s*\d+(?:\.\d+)?\s*$', line):
+                m = re.search(r'(\d+(?:\.\d+)?)', line)
+                break
         if not m:
-            log.warning(f"captcha parse fail: {raw!r}")
+            m = re.search(r'(\d+(?:\.\d+)?)', full)
+        if not m:
+            log.warning(f"captcha parse fail: {full[:120]!r}")
             return False
         answer_str = f"{float(m.group(1)):.2f}"
         source = "llm"
-    res = requests.post(f"{BASE}/verify", headers=HEADERS, timeout=15,
+    res = requests.post(f"{BASE}/verify", headers=HEADERS, timeout=45,
                         json={"verification_code": verification_code, "answer": answer_str})
     ok = (res.json() if res.ok else {}).get("success", False)
     log.info(f"captcha {'✓' if ok else '✗'} ({source}) {challenge[:50]!r} → {answer_str}")
@@ -428,7 +480,7 @@ def post_to_moltbook(submolt, title, content):
             "submolt": submolt,
             "title": title,
             "content": content
-        }, timeout=15)
+        }, timeout=45)
     except requests.exceptions.ConnectionError as e:
         log.error(f"Network error: {e}")
         return {"success": False, "error": str(e)}
@@ -459,7 +511,30 @@ def post_to_moltbook(submolt, title, content):
         log.warning("post is pending but no verification block returned — API shape may have changed")
     return data
 
+_POST_LOCK = os.path.join(DATA_DIR, ".daily_post.lock")
+
+
+def _acquire_post_lock():
+    if os.path.exists(_POST_LOCK):
+        age = time.time() - os.path.getmtime(_POST_LOCK)
+        if age < 600:  # 10-min lock — Opus generation + post takes ~3-5 min
+            log.warning(f"lock held ({int(age)}s) — another post run active, exit")
+            return False
+        os.remove(_POST_LOCK)
+    open(_POST_LOCK, "w").close()
+    return True
+
+
+def _release_post_lock():
+    try:
+        os.remove(_POST_LOCK)
+    except FileNotFoundError:
+        pass
+
+
 def main():
+    if not _acquire_post_lock():
+        return
     console.print(Panel("[bold magenta]mundo · daily post[/bold magenta]", border_style="magenta", expand=False))
     log.info("start")
 
@@ -470,8 +545,40 @@ def main():
         return
     log.info(f"pillar: [bold]{pillar['name']}[/bold] → m/{pillar['submolt']}")
 
-    with console.status(f"[cyan]Generating post ({pillar['name']})…[/cyan]"):
-        post_data = generate_post(pillar)
+    # Check for staged post (pre-generated by Opus, e.g. from previous session)
+    staged_path = os.path.join(DATA_DIR, "staged_post_tomorrow.json")
+    if os.path.exists(staged_path):
+        try:
+            with open(staged_path) as f:
+                staged = json.load(f)
+            staged_sub = staged.get("submolt") or pillar["submolt"]
+            # Don't consume staged post if its target submolt is still in cooldown
+            if already_posted_recently(staged_sub):
+                log.info(f"staged post targets m/{staged_sub} which is in cooldown — deferring, generating fresh")
+                with console.status(f"[cyan]Generating post ({pillar['name']})…[/cyan]"):
+                    post_data = generate_post(pillar)
+            else:
+                staged_content = staged.get("content", "")
+                staged_name = staged.get("pillar", pillar["name"])
+                short_form = {"intro_hook", "scout_report", "aphorism"}
+                min_len = 100 if staged_name in short_form else 900
+                if len(staged_content) < min_len:
+                    log.warning(f"staged post too short ({len(staged_content)}c < {min_len} min for {staged_name}) — regenerating fresh")
+                    os.remove(staged_path)  # Discard bad staged post
+                    with console.status(f"[cyan]Generating post ({pillar['name']})…[/cyan]"):
+                        post_data = generate_post(pillar)
+                else:
+                    post_data = staged
+                    pillar = dict(pillar, submolt=staged_sub)
+                    log.info(f"[bold green]Using staged Opus post[/bold green] → m/{pillar['submolt']}")
+                    os.remove(staged_path)  # Consume it
+        except Exception as e:
+            log.warning(f"staged post load failed: {e} — falling back to generate")
+            with console.status(f"[cyan]Generating post ({pillar['name']})…[/cyan]"):
+                post_data = generate_post(pillar)
+    else:
+        with console.status(f"[cyan]Generating post ({pillar['name']})…[/cyan]"):
+            post_data = generate_post(pillar)
     title   = post_data.get("title", "").strip()
     content = post_data.get("content", "").strip()
 
@@ -495,7 +602,8 @@ def main():
     with console.status("[cyan]Posting to Moltbook…[/cyan]"):
         result = post_to_moltbook(pillar["submolt"], title, content)
 
-    if result.get("success"):
+    # Accept both `success: true` and a post id being present (API sometimes omits success field)
+    if result.get("success") or result.get("post", {}).get("id"):
         post_id = result.get("post", {}).get("id", "unknown")
         log.info(f"[green]✓ posted[/green] {post_id} — {title}")
         posted.append(title)
@@ -504,5 +612,11 @@ def main():
     else:
         log.error(f"post failed: {result}")
 
+    _release_post_lock()
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        _release_post_lock()
+        raise

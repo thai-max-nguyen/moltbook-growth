@@ -69,18 +69,25 @@ def already_engaged_today() -> bool:
 
 def run_script(script: Path, label: str) -> bool:
     log(f"running {label}…")
-    result = subprocess.run(
-        [sys.executable, str(script)],
-        capture_output=True, text=True, timeout=300
-    )
-    if result.returncode == 0:
-        log(f"{label} ✓")
-        return True
-    else:
-        log(f"{label} ✗ rc={result.returncode}")
-        if result.stderr:
-            log(f"  stderr: {result.stderr.strip()[:200]}")
-        return False
+    # engage can take 30+ min (MAX_REPLIES=6 + MAX_COMMENTS=4 × 75s DELAY + API overhead)
+    # 300s killed engage before completion → state unsaved → infinite retry loop
+    TIMEOUT = 2400  # 40 min: generous ceiling above 1431s worst-case engage run
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True, text=True, timeout=TIMEOUT
+        )
+        if result.returncode == 0:
+            log(f"{label} ✓")
+            return True
+        else:
+            log(f"{label} ✗ rc={result.returncode}")
+            if result.stderr:
+                log(f"  stderr: {result.stderr.strip()[:200]}")
+            return False
+    except subprocess.TimeoutExpired:
+        log(f"{label} ⚠ timeout after {TIMEOUT}s — marking done to prevent retry loop")
+        return True  # Mark done — cron handles next run; retry loop is worse than partial run
 
 
 def main():

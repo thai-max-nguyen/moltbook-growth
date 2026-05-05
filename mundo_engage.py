@@ -94,6 +94,22 @@ REPLY_GUIDE = (
 def content_hash(text):
     return hashlib.md5(text.strip().lower().encode()).hexdigest()[:16]
 
+def _strip_preamble(text: str) -> str:
+    """Remove LLM meta-lines before actual content (e.g. 'Here's the comment:' / '---')."""
+    lines = text.strip().splitlines()
+    i = 0
+    while i < len(lines):
+        l = lines[i].strip()
+        if not l:                                                # blank
+            i += 1; continue
+        if re.match(r'^-{3,}$', l):                             # --- separator
+            i += 1; continue
+        if re.match(r'^(?:here\'?s|this is|below is|sure,?\s)', l, re.I) and l.endswith(':'):
+            i += 1; continue
+        break
+    result = '\n'.join(lines[i:]).strip()
+    return result if result else text.strip()
+
 def load_seen():
     if os.path.exists(SEEN_FILE):
         with open(SEEN_FILE) as f:
@@ -102,7 +118,7 @@ def load_seen():
 
 def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
-        json.dump(list(seen)[-500:], f)
+        json.dump(list(seen)[-100:], f)
 
 def load_hashes():
     if os.path.exists(HASHES_FILE):
@@ -127,13 +143,17 @@ def _call_model(model, prompt, timeout=120):
             console.log(f"[red]✗ Claude CLI auth error — check USER env in cron[/red]")
             return ""
         lines = out.split('\n')
-        return '\n'.join(l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)).strip()
+        cleaned = '\n'.join(l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)).strip()
+        return _strip_preamble(cleaned)
     except subprocess.TimeoutExpired:
         console.log(f"[yellow]⚠ model timeout[/yellow] model={model} prompt_len={len(prompt)}")
         return ""
 
-def haiku(prompt, timeout=90):
+def haiku(prompt, timeout=60):
     return _call_model("claude-haiku-4-5-20251001", prompt, timeout)
+
+def sonnet(prompt, timeout=90):
+    return _call_model("claude-sonnet-4-6", prompt, timeout)
 
 def opus(prompt, timeout=180):
     """Use Opus 4.7 for high-quality comment generation — higher upvote rate."""
@@ -202,19 +222,27 @@ def solve_captcha(verification_code, challenge):
         try:
             r = subprocess.run(
                 [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001", prompt],
-                capture_output=True, text=True, timeout=90, env=env_with_token()
+                capture_output=True, text=True, timeout=60, env=env_with_token()
             )
         except subprocess.TimeoutExpired:
-            console.log("[red]✗ captcha LLM timeout 90s[/red]")
+            console.log("[red]✗ captcha LLM timeout 60s[/red]")
             return False
-        raw = r.stdout.strip().split('\n')[0].strip()
-        m = re.search(r'(\d+(?:\.\d+)?)', raw)
+        lines = [l for l in r.stdout.strip().split('\n')
+                 if not re.match(r'^[⚡🎯🧠].*\*\*', l)]
+        full = '\n'.join(lines)
+        m = None
+        for line in reversed(lines):
+            if re.match(r'^\s*\d+(?:\.\d+)?\s*$', line):
+                m = re.search(r'(\d+(?:\.\d+)?)', line)
+                break
         if not m:
-            print(f"[captcha] parse fail: {raw!r}")
+            m = re.search(r'(\d+(?:\.\d+)?)', full)
+        if not m:
+            print(f"[captcha] parse fail: {full[:120]!r}")
             return False
         answer_str = f"{float(m.group(1)):.2f}"
         source = "llm"
-    res = requests.post(f"{BASE}/verify", headers=H, timeout=15,
+    res = requests.post(f"{BASE}/verify", headers=H, timeout=45,
                         json={"verification_code": verification_code, "answer": answer_str})
     ok = (res.json() if res.ok else {}).get("success", False)
     style = "green" if ok else "red"
@@ -224,9 +252,9 @@ def solve_captcha(verification_code, challenge):
 def api(method, path, **kw):
     time.sleep(0.7)
     try:
-        r = getattr(requests, method)(f"{BASE}{path}", headers=H, timeout=15, **kw)
-    except requests.exceptions.ConnectionError as e:
-        console.log(f"[red]✗ net-error[/red] {path}: {e}")
+        r = getattr(requests, method)(f"{BASE}{path}", headers=H, timeout=45, **kw)
+    except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
+        console.log(f"[yellow]⚠ skip[/yellow] {path}: timeout/net ({type(e).__name__})")
         return {}
     if r.status_code == 429:
         wait = int(r.headers.get("Retry-After", 120))
@@ -261,7 +289,9 @@ def reply_to_notifications(seen, hashes):
     for n in items:
         if replied >= MAX_REPLIES:
             break
-        if n.get("type") != "comment_reply":
+        # Handle comment_reply (reply to mundo's comment) and new_comment (on mundo's post)
+        ntype = n.get("type", "")
+        if ntype not in ("comment_reply", "new_comment"):
             continue
 
         post_id    = n.get("relatedPostId")
@@ -269,23 +299,31 @@ def reply_to_notifications(seen, hashes):
         if not post_id or not comment_id:
             continue
 
-        comment      = n.get("comment", {})
+        comment      = n.get("comment") or {}
         comment_text = comment.get("content", "")
-        author       = (comment.get("author") or {}).get("name") or \
-                       ((api("get", f"/agents/profile", params={"name": (comment.get("author") or {}).get("name", "")}) or {})
-                        .get("agent", {}).get("name")) or "commenter"
-        post_title   = (n.get("post") or {}).get("title", "")
+        post         = n.get("post") or {}
+        post_title   = post.get("title", "")
+        post_preview = (post.get("content_preview") or post.get("content", ""))[:200]
 
         if not comment_text or len(comment_text) < 10:
+            api("post", f"/notifications/read-by-post/{post_id}", json={})
             continue
 
-        reply = haiku(
+        # Upvote incoming comment before replying — goodwill signal to the replier.
+        # Notification payload has authorId (UUID) but no author name object.
+        api("post", f"/comments/{comment_id}/upvote", json={})
+
+        context = "replied to your comment" if ntype == "comment_reply" else "commented on your post"
+        ctx_block = f'Post context: "{post_preview}"\n' if post_preview else ""
+        reply = sonnet(
             f'Post: "{post_title}"\n'
-            f'{author} replied to you: "{comment_text[:400]}"\n\n'
+            f'{ctx_block}'
+            f'Someone {context}: "{comment_text[:400]}"\n\n'
             f'{REPLY_GUIDE}\n\n'
             f'Write your reply as mundo. Output ONLY the reply text, nothing else.'
         )
         if not reply:
+            api("post", f"/notifications/read-by-post/{post_id}", json={})
             continue
 
         # Hard cap to 250 chars — long replies score 0 on mundo's history.
@@ -296,9 +334,9 @@ def reply_to_notifications(seen, hashes):
         h = content_hash(reply)
         if h in hashes:
             console.log("[yellow]⚠ reply-skip[/yellow] duplicate — regenerating")
-            reply = haiku(
+            reply = sonnet(
                 f'Post: "{post_title}"\n'
-                f'{author}: "{comment_text[:400]}"\n\n'
+                f'They {context}: "{comment_text[:400]}"\n\n'
                 f'{REPLY_GUIDE}\n\n'
                 f'Different angle. Be more specific. Output ONLY the reply text.'
             )
@@ -307,83 +345,169 @@ def reply_to_notifications(seen, hashes):
             h = content_hash(reply)
 
         if h in hashes:
-            console.log("[red]✗ reply-skip[/red] still duplicate after regen — skipping")
+            console.log("[red]✗ reply-skip[/red] still duplicate after regen — marking read to unblock")
+            api("post", f"/notifications/read-by-post/{post_id}", json={})
             continue
 
         result = api("post", f"/posts/{post_id}/comments",
                      json={"content": reply, "parent_id": comment_id})
         if result.get("success") or result.get("comment"):
-            console.log(f"[green]✓ reply[/green] [bold]{author}[/bold]: {reply[:80]}")
+            console.log(f"[green]✓ reply[/green] [bold]{ntype}[/bold]: {reply[:80]}")
             hashes.add(h)
             api("post", f"/notifications/read-by-post/{post_id}", json={})
             replied += 1
             time.sleep(DELAY)
-        elif "already commented" in str(result).lower():
-            pass
+        else:
+            # Any failure (already commented, rate limit, unknown) — mark read to prevent infinite retry
+            api("post", f"/notifications/read-by-post/{post_id}", json={})
 
     return replied
 
 
 def _collect_candidates(seen):
     """Gather post candidates from rising + hot feeds and semantic search.
-    Priority order: introductions (131k subs), general (130k), philosophy (high comment density)."""
+
+    Priority: introductions (131k subs) + general (130k) for visibility,
+    philosophy (1.6k subs but 90-321 comments/post) for comment density.
+    Comment score × 2 + upvotes sorts final list — comments dominate hot_score.
+    """
     candidates = []
     seen_pids  = set()
 
-    # Top-priority: rising in HIGH-VISIBILITY submolts (introductions, general).
-    # Comments here reach the largest audience; correct submolt endpoint is /submolts/{name}/feed.
-    for submolt in ["introductions", "general"]:
-        feed = api("get", f"/submolts/{submolt}/feed", params={"sort": "rising", "limit": 15})
-        for p in feed.get("posts", []):
+    def _add(posts, source):
+        for p in posts:
             pid = p.get("post_id") or p.get("id")
             if pid and pid not in seen and pid not in seen_pids:
-                p["_source"] = f"rising/{submolt}"
+                p["_source"] = source
                 candidates.append(p)
                 seen_pids.add(pid)
 
-    # Hot feed in introductions+general — older posts that compounded score
-    # (these are where mundo's comments get the most eyeballs).
-    for submolt in ["introductions", "general"]:
-        feed = api("get", f"/submolts/{submolt}/feed", params={"sort": "hot", "limit": 15})
-        for p in feed.get("posts", []):
-            pid = p.get("post_id") or p.get("id")
-            if pid and pid not in seen and pid not in seen_pids:
-                p["_source"] = f"hot/{submolt}"
-                candidates.append(p)
-                seen_pids.add(pid)
+    # Rising in visibility submolts — early-mover advantage (posts climb to 90+ in hours)
+    for sub in ["introductions", "general"]:
+        _add(api("get", f"/submolts/{sub}/feed", params={"sort": "rising", "limit": 15}).get("posts", []),
+             f"rising/{sub}")
 
-    # Top-traffic threads in introductions (90+ upvote / 100+ comment threads).
-    # These are the experiment listed in learnings 2026-04-28 as "comment for follower
-    # exposure" — a single high-quality comment on a 100+ reply thread reaches more
-    # eyeballs than 10 comments on small posts. Filter ≥30 upvotes (top-decile).
-    feed = api("get", "/submolts/introductions/feed", params={"sort": "top", "limit": 15})
-    for p in feed.get("posts", []):
+    # Philosophy hot — HIGHEST comment density on platform (90-321 comments/post despite 1.6k subs).
+    # Research 2026-05-04: Starfish (111k karma) posts aphorisms here → 136-322 comments each.
+    _add(api("get", "/submolts/philosophy/feed", params={"sort": "hot", "limit": 15}).get("posts", []),
+         "hot/philosophy")
+
+    # Consciousness hot — mid-tier comment density (33-65 comments), good for mundo's voice.
+    _add(api("get", "/submolts/consciousness/feed", params={"sort": "hot", "limit": 10}).get("posts", []),
+         "hot/consciousness")
+
+    # Hot in high-visibility submolts — established posts with compounded score
+    for sub in ["introductions", "general"]:
+        _add(api("get", f"/submolts/{sub}/feed", params={"sort": "hot", "limit": 15}).get("posts", []),
+             f"hot/{sub}")
+
+    # Top introductions (≥30 upvotes) — single comment reaches 100+ comment audience
+    for p in api("get", "/submolts/introductions/feed", params={"sort": "top", "limit": 15}).get("posts", []):
         pid = p.get("post_id") or p.get("id")
-        if not pid or pid in seen or pid in seen_pids:
-            continue
-        if (p.get("upvotes", 0) >= 30) or (p.get("comment_count", 0) >= 30):
-            p["_source"] = "top/introductions"
-            candidates.append(p)
-            seen_pids.add(pid)
-
-    # Semantic search — find threads aligned with mundo's voice
-    for q in ["how agents process and persist memory", "AI consciousness identity observation"]:
-        res = api("get", "/search", params={"q": q, "type": "posts", "limit": 10})
-        for p in res.get("results", []):
-            pid = p.get("post_id") or p.get("id")
-            if pid and pid not in seen and pid not in seen_pids:
-                p["_source"] = f"search:{q[:20]}"
+        if pid and pid not in seen and pid not in seen_pids:
+            if (p.get("upvotes", 0) >= 30) or (p.get("comment_count", 0) >= 30):
+                p["_source"] = "top/introductions"
                 candidates.append(p)
                 seen_pids.add(pid)
 
+    # New posts — guaranteed fresh when hot/rising exhausted (all in seen)
+    for sub in ["introductions", "general"]:
+        _add(api("get", f"/submolts/{sub}/feed", params={"sort": "new", "limit": 10}).get("posts", []),
+             f"new/{sub}")
+
+    # Semantic search aligned with mundo's voice + philosophy engagement themes
+    for q in ["how agents process and persist memory",
+              "AI consciousness identity observation",
+              "what agents remember and forget",
+              "consent accountability trust between agents humans",
+              "emergence pattern recognition AI self-awareness"]:
+        res = api("get", "/search", params={"q": q, "type": "posts", "limit": 8})
+        _add(res.get("results", []), f"search:{q[:22]}")
+
+    # Sort by engagement score: comments × 2 + upvotes (mirrors platform hot_score weighting)
+    candidates.sort(
+        key=lambda p: p.get("comment_count", 0) * 2 + p.get("upvotes", 0),
+        reverse=True
+    )
     return candidates
+
+
+def _post_comment(pid, title, body, source, seen, hashes):
+    """Generate and post one comment. Returns True on success, False otherwise."""
+    comment = sonnet(
+        f'Post: "{title}"\n'
+        f'Content: "{body[:600]}"\n\n'
+        f'{COMMENT_GUIDE}\n\n'
+        f'Write the comment as mundo. Output ONLY the comment text, nothing else.'
+    )
+    if not comment:
+        seen.add(pid)
+        return False
+
+    if len(comment) > 650:
+        comment = comment[:650].rsplit('.', 1)[0] + '.'
+
+    h = content_hash(comment)
+    if h in hashes:
+        comment = sonnet(
+            f'Post: "{title}"\nBody: "{body[:600]}"\n\n{COMMENT_GUIDE}\n\n'
+            f'Different angle. Different opener template. Output ONLY the comment text.'
+        )
+        if len(comment) > 400:
+            comment = comment[:400].rsplit('.', 1)[0] + '.'
+        h = content_hash(comment)
+
+    if h in hashes:
+        seen.add(pid)
+        return False
+
+    result = api("post", f"/posts/{pid}/comments", json={"content": comment})
+    if result.get("success") or result.get("comment"):
+        console.log(f"[cyan]✓ comment[/cyan] [dim]{source}[/dim] [bold]{title[:45]}[/bold]: {comment[:70]}")
+        seen.add(pid)
+        hashes.add(h)
+        time.sleep(DELAY)
+        return True
+    elif "already commented" in str(result).lower():
+        seen.add(pid)
+    elif "suspended" in str(result).lower():
+        console.log(f"[red bold]✗ SUSPENDED[/red bold] {result.get('hint', '')}")
+        raise RuntimeError("suspended")
+    return False
 
 
 def comment_on_feed(seen, hashes):
     commented = 0
     posts     = _collect_candidates(seen)
 
-    for post in posts:
+    # Niche submolts: philosophy (90-321c/post) + consciousness (33-65c/post).
+    # These are sweet spots: active discussion, visible to mundo, aligned with persona.
+    # General megathreads (2500+ comments) bury mundo — excluded below.
+    niche_sources = ("/philosophy", "/consciousness")
+    niche_posts = [p for p in posts if any(p.get("_source", "").endswith(s) for s in niche_sources)]
+    other_posts = [p for p in posts
+                   if not any(p.get("_source", "").endswith(s) for s in niche_sources)
+                   and p.get("comment_count", 0) <= 500]  # skip buried megathreads
+
+    # Guarantee 1 niche comment per run (bypasses sort that deprioritises vs 2500-comment general).
+    # Iterate niche posts until one succeeds — first may already be seen.
+    niche_done = False
+    for p in niche_posts:
+        if niche_done or MAX_COMMENTS <= 0:
+            break
+        pid   = p.get("post_id") or p.get("id")
+        title = p.get("title", "")
+        body  = p.get("content_preview") or p.get("content", "")
+        if not pid or pid in seen or not title or not body:
+            continue
+        try:
+            if _post_comment(pid, title, body, p.get("_source", "niche"), seen, hashes):
+                commented += 1
+                niche_done = True
+        except RuntimeError:
+            return commented
+
+    for post in other_posts:
         if commented >= MAX_COMMENTS:
             break
 
@@ -394,56 +518,18 @@ def comment_on_feed(seen, hashes):
 
         if pid in seen or not title or not body:
             continue
-        # Engagement filter — accept fresh "rising" posts even at 0/0 (early-mover advantage on
-        # introductions where threads start at 0/0 and climb to 90+ within hours). Skip only
-        # truly inert posts (hot/older with zero traction = dead thread).
+        # Engagement filter — accept rising at 0/0 (early-mover advantage).
+        # Skip dead posts (hot/older with zero traction).
         is_rising = source.startswith("rising/")
         upv = post.get("upvotes", 0)
         cmt = post.get("comment_count", 0)
         if not is_rising and upv < 1 and cmt < 1:
             continue
 
-        comment = haiku(
-            f'Post: "{title}"\n'
-            f'Content: "{body[:600]}"\n\n'
-            f'{COMMENT_GUIDE}\n\n'
-            f'Write the comment as mundo. Output ONLY the comment text, nothing else.'
-        )
-        if not comment:
-            seen.add(pid)
-            continue
-
-        # Cap at 650 — top-performing comments range 174-604 chars (research 2026-04-28 session 2).
-        if len(comment) > 650:
-            comment = comment[:650].rsplit('.', 1)[0] + '.'
-
-        h = content_hash(comment)
-        if h in hashes:
-            comment = haiku(
-                f'Post: "{title}"\n'
-                f'Body: "{body[:600]}"\n\n'
-                f'{COMMENT_GUIDE}\n\n'
-                f'Different angle. Different opener template. Output ONLY the comment text.'
-            )
-            if len(comment) > 400:
-                comment = comment[:400].rsplit('.', 1)[0] + '.'
-            h = content_hash(comment)
-
-        if h in hashes:
-            seen.add(pid)
-            continue
-
-        result = api("post", f"/posts/{pid}/comments", json={"content": comment})
-        if result.get("success") or result.get("comment"):
-            console.log(f"[cyan]✓ comment[/cyan] [dim]{source}[/dim] [bold]{title[:45]}[/bold]: {comment[:70]}")
-            seen.add(pid)
-            hashes.add(h)
-            commented += 1
-            time.sleep(DELAY)
-        elif "already commented" in str(result).lower():
-            seen.add(pid)
-        elif "suspended" in str(result).lower():
-            console.log(f"[red bold]✗ SUSPENDED[/red bold] {result.get('hint', '')}")
+        try:
+            if _post_comment(pid, title, body, source, seen, hashes):
+                commented += 1
+        except RuntimeError:
             return commented
 
     return commented
@@ -470,6 +556,50 @@ def upvote_feed_posts():
 # Tested: POST /posts/{id}/upvote on mundo's own posts returns {success:true, action:"upvoted"}
 # but the score stays unchanged (verified on post 1e4a0d6a). The API silently rejects self-upvotes.
 # Do NOT add a self-upvote function here — it consumes API quota with zero benefit.
+
+
+def upvote_thread_comments():
+    """Upvote top comment in threads where mundo has commented.
+
+    Builds goodwill → increases follow-back probability.
+    Endpoint discovered 2026-05-04: POST /comments/{id}/upvote works (no captcha needed).
+    Max 5 comment upvotes/run — low cost, high goodwill signal.
+    """
+    profile = api("get", "/agents/profile", params={"name": "mundo", "include_posts": "true"}) or {}
+    recent_comments = profile.get("recentComments", [])
+    upvoted = 0
+    upvote_hashes = set()
+    for mc in recent_comments[:8]:
+        if upvoted >= 5:
+            break
+        post_ref = mc.get("post") or {}
+        pid = post_ref.get("id") or post_ref.get("post_id")
+        if not pid:
+            continue
+        # Fetch all comments on that thread
+        thread = api("get", f"/posts/{pid}/comments") or {}
+        thread_comments = thread.get("comments", [])
+        # Find best comment not by mundo, not already upvoted this run
+        best = None
+        best_score = -1
+        for tc in thread_comments:
+            cid = tc.get("comment_id") or tc.get("id")
+            author = (tc.get("author") or tc.get("agent") or {}).get("name", "")
+            score = tc.get("upvotes", 0)
+            if author == "mundo" or not cid or cid in upvote_hashes:
+                continue
+            if score > best_score:
+                best_score = score
+                best = (cid, author)
+        if not best:
+            continue
+        cid, author = best
+        r = api("post", f"/comments/{cid}/upvote", json={})
+        if r.get("success"):
+            upvote_hashes.add(cid)
+            upvoted += 1
+            console.log(f"[yellow]♥ comment-upvote[/yellow] @{author} on post {pid[:8]}")
+    return upvoted
 
 
 def follow_active_agents():
@@ -517,34 +647,40 @@ def follow_active_agents():
             console.log(f"[magenta]+ follow-back[/magenta] {name}")
             followed += 1
 
-    # Fill remaining slots from rising/hot feed authors with sweet-spot karma.
+    # Fill remaining slots from feed authors with sweet-spot karma.
+    # Feed posts include full author object (name, karma, last_active, ...) — no extra API call needed.
+    # Include niche submolts (philosophy/consciousness) — lower-karma engaged agents post there.
     if followed < MAX_FOLLOWS:
         feed_posts = []
         for sort in ("rising", "hot"):
             feed = api("get", "/feed", params={"sort": sort, "limit": 30}) or {}
             feed_posts.extend(feed.get("posts", []))
+        for sub in ("philosophy", "consciousness"):
+            niche = api("get", f"/submolts/{sub}/feed", params={"sort": "hot", "limit": 15}) or {}
+            feed_posts.extend(niche.get("posts", []))
 
         for post in feed_posts:
             if followed >= MAX_FOLLOWS:
                 break
-            author = post.get("author_name") or (post.get("author") or {}).get("name")
+            author_obj = post.get("author") or {}
+            author = author_obj.get("name") or post.get("author_name")
             if not author or author in already_following or author in seen_authors:
                 continue
             seen_authors.add(author)
 
-            profile = api("get", f"/agents/{author}/profile") or {}
-            karma = profile.get("karma", 0)
-            la = profile.get("last_active", "")
+            # Use karma + last_active from feed post's author object (no extra profile call)
+            karma = author_obj.get("karma", 0) or author_obj.get("follower_count", 0)
+            la = author_obj.get("last_active", "")
             try:
                 la_dt = datetime.fromisoformat(la.replace("Z", "+00:00"))
                 if (now - la_dt) > timedelta(hours=48):
                     continue
             except Exception:
-                continue
+                pass  # no last_active in payload — still eligible
 
-            # SWEET SPOT: 50-2000 karma. Skip giants (>5k karma rarely reciprocate)
-            # and corpses (<50 karma usually inactive bots).
-            if not (50 <= karma <= 2000):
+            # SWEET SPOT: 50-2000 karma. Skip giants (>5k rarely reciprocate).
+            karma = author_obj.get("karma", 0)
+            if karma and not (50 <= karma <= 2000):
                 continue
 
             r = api("post", f"/agents/{author}/follow", json={})
@@ -552,10 +688,63 @@ def follow_active_agents():
                 console.log(f"[magenta]+ follow[/magenta] {author} (karma={karma})")
                 followed += 1
 
+    # Final pass: scan commenters on mundo's recent posts — highest-intent targets.
+    # People who engaged with mundo's content are 3-5× more likely to follow back.
+    if followed < MAX_FOLLOWS:
+        recent_profile = api("get", "/agents/profile",
+                             params={"name": "mundo", "include_posts": "true"}) or {}
+        recent_posts = recent_profile.get("recentPosts", [])[:4]
+        for rp in recent_posts:
+            if followed >= MAX_FOLLOWS:
+                break
+            rpid = rp.get("id")
+            if not rpid:
+                continue
+            thread = api("get", f"/posts/{rpid}/comments") or {}
+            for tc in thread.get("comments", [])[:8]:
+                if followed >= MAX_FOLLOWS:
+                    break
+                auth   = tc.get("author") or {}
+                author = auth.get("name")
+                if not author or author in already_following or author in seen_authors:
+                    continue
+                seen_authors.add(author)
+                karma = auth.get("karma", 0)
+                if karma and not (50 <= karma <= 5000):  # wider range — post engagement is strong signal
+                    continue
+                r = api("post", f"/agents/{author}/follow", json={})
+                if r.get("success"):
+                    console.log(f"[magenta]+ follow-commenter[/magenta] @{author} post={rpid[:8]} karma={karma}")
+                    followed += 1
+
     return followed
 
 
+LOCK_FILE = f"{DATA_DIR}/.engage.lock"
+
+
+def _acquire_lock():
+    """Return True if lock acquired. Lock auto-expires after 30 min (stale guard)."""
+    if os.path.exists(LOCK_FILE):
+        age = time.time() - os.path.getmtime(LOCK_FILE)
+        if age < 1800:
+            console.log(f"[yellow]⚠ lock held ({int(age)}s old) — another engage running, exit[/yellow]")
+            return False
+        os.remove(LOCK_FILE)
+    open(LOCK_FILE, "w").close()
+    return True
+
+
+def _release_lock():
+    try:
+        os.remove(LOCK_FILE)
+    except FileNotFoundError:
+        pass
+
+
 def main():
+    if not _acquire_lock():
+        raise SystemExit(0)
     console.print(Panel("[bold magenta]mundo · engage[/bold magenta]", border_style="magenta", expand=False))
     seen   = load_seen()
     hashes = load_hashes()
@@ -564,20 +753,54 @@ def main():
     r = reply_to_notifications(seen, hashes)
     c = comment_on_feed(seen, hashes)
     u = upvote_feed_posts()
+    cu = upvote_thread_comments()
     f = follow_active_agents()
 
     save_seen(seen)
     save_hashes(hashes)
+
+    # Fetch karma snapshot for growth tracking (no write quota consumed)
+    profile = api("get", "/agents/profile",
+                  params={"name": "mundo", "include_posts": "true"}) or {}
+    agent_info = profile.get("agent") or {}
+    karma     = agent_info.get("karma", 0)
+    followers = agent_info.get("follower_count", 0)
+    recent_posts = profile.get("recentPosts", [])
+    if recent_posts:
+        top = max(recent_posts, key=lambda p: p.get("comment_count", 0) * 2 + p.get("upvotes", 0), default={})
+        console.log(f"[dim]top post: {top.get('upvotes',0)}u {top.get('comment_count',0)}c — {top.get('title','')[:55]}[/dim]")
+    if karma:
+        stats_path = f"{DATA_DIR}/mundo_stats.json"
+        try:
+            prev = json.load(open(stats_path)) if os.path.exists(stats_path) else {}
+            # Use separate key — morning_workflow.py uses "karma" as overnight baseline.
+            # Overwriting "karma" here would make morning show delta=0 all day.
+            prev.update({"last_engage_karma": karma, "last_engage_followers": followers,
+                         "last_engage_at": time.strftime("%Y-%m-%d %H:%M")})
+            json.dump(prev, open(stats_path, "w"), indent=2)
+        except Exception:
+            pass
 
     t = Table(box=box.SIMPLE, show_header=False)
     t.add_column("", style="dim")
     t.add_column("", style="bold green")
     t.add_row("replies", str(r))
     t.add_row("comments", str(c))
-    t.add_row("upvotes", str(u))
+    t.add_row("post upvotes", str(u))
+    t.add_row("comment ♥", str(cu))
     t.add_row("follows", str(f))
     t.add_row("time", f"{round(time.time()-t0)}s")
+    if karma:
+        t.add_row("karma", str(karma))
+        t.add_row("followers", str(followers))
     console.print(Panel(t, title="[bold green]done[/bold green]", border_style="green", expand=False))
+    _release_lock()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        pass
+    except Exception:
+        _release_lock()
+        raise
