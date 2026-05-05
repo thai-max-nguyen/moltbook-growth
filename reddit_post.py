@@ -35,7 +35,7 @@ DATA_DIR   = os.path.dirname(os.path.abspath(__file__))
 CONFIG_F   = f"{DATA_DIR}/reddit_config.json"
 STATE_F    = f"{DATA_DIR}/reddit_state.json"
 HASHES_F   = f"{DATA_DIR}/reddit_hashes.json"
-CLAUDE_BIN = "/usr/local/bin/claude"
+CLAUDE_BIN = "/Users/lap15964/.local/bin/claude"
 
 # === Rate-limit constants ===
 # Reddit's quoted limit is 1 comment / minute for established accounts but new
@@ -212,8 +212,12 @@ def get_headers(cfg):
 
 
 def reddit_get(cfg, path, **params):
-    r = requests.get(f"https://oauth.reddit.com{path}", headers=get_headers(cfg),
-                     params=params, timeout=15)
+    try:
+        r = requests.get(f"https://oauth.reddit.com{path}", headers=get_headers(cfg),
+                         params=params, timeout=15)
+    except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
+        log.warning(f"reddit_get network error {path}: {type(e).__name__}")
+        return {}
     if r.status_code == 401:
         log.error("[red]401 Unauthorized — token expired, extract a fresh token_v2 from reddit.com[/red]")
         sys.exit(1)
@@ -221,8 +225,12 @@ def reddit_get(cfg, path, **params):
 
 
 def reddit_post(cfg, path, data):
-    r = requests.post(f"https://oauth.reddit.com{path}", headers=get_headers(cfg),
-                      data=data, timeout=15)
+    try:
+        r = requests.post(f"https://oauth.reddit.com{path}", headers=get_headers(cfg),
+                          data=data, timeout=15)
+    except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
+        log.warning(f"reddit_post network error {path}: {type(e).__name__}")
+        return {}
     if r.status_code == 401:
         log.error("[red]401 Unauthorized — token expired[/red]")
         sys.exit(1)
@@ -265,7 +273,18 @@ def haiku(prompt, timeout=90):
             log.error(f"Claude CLI auth error: {out[:80]}")
             raise RuntimeError("Claude CLI not authenticated")
         lines = out.split("\n")
-        return "\n".join(l for l in lines if not re.match(r"^[⚡🎯🧠].*\*\*", l)).strip()
+        cleaned = "\n".join(l for l in lines if not re.match(r"^[⚡🎯🧠].*\*\*", l)).strip()
+        # Strip LLM preamble ("Here's the comment:", "---", etc.)
+        parts = cleaned.strip().splitlines()
+        i = 0
+        while i < len(parts):
+            l = parts[i].strip()
+            if not l or re.match(r'^-{3,}$', l) or (
+                re.match(r'^(?:here\'?s|this is|below is|sure,?\s)', l, re.I) and l.endswith(':')
+            ):
+                i += 1; continue
+            break
+        return "\n".join(parts[i:]).strip() or cleaned
     except subprocess.TimeoutExpired:
         log.warning(f"haiku timeout — prompt len={len(prompt)}")
         return ""
