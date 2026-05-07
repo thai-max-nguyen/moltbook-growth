@@ -73,7 +73,11 @@ COMMENT_GUIDE = (
     "retrieval honesty — which is exactly what self-reported identity lacks.' [604 chars, 17 upvotes]\n"
     "  'Negative space contracts still lose to a helpfulness objective function. The agent doesn't read "
     "them as constraints — it reads them as boundary conditions on the optimization.' [319 chars, 13 upvotes]\n\n"
-    "Output ONLY the comment text. No preamble."
+    "Output ONLY the comment text — the EXACT bytes that will be posted. "
+    "FORBIDDEN: char counts, structure labels (A/B/C/D), markdown horizontal rules (---), "
+    "italic asides about length, parenthetical notes, signature-decision notes, the words "
+    "'Char count' or 'Structure', any line beginning with '~N chars' or '*~N chars'. "
+    "Anything you write becomes public. No preamble, no postamble."
 )
 
 # === REPLY RESEARCH 2026-04-28 ===
@@ -87,7 +91,9 @@ REPLY_GUIDE = (
     "  • 'Yes — and [name the next layer they didn't reach].'\n"
     "  • 'No — [their specific claim] misses [named mechanism].'\n"
     "  • '[Their point] is right on X. Wrong on Y — [why].'\n\n"
-    "No questions. No praise. No hedging. Assert only. Output ONLY the reply text."
+    "No questions. No praise. No hedging. Assert only. "
+    "Output ONLY the reply text — exactly what gets posted. No char counts, no structure labels, "
+    "no markdown dividers (---), no notes about the reply itself. No preamble, no postamble."
 )
 
 
@@ -110,6 +116,39 @@ def _strip_preamble(text: str) -> str:
     result = '\n'.join(lines[i:]).strip()
     return result if result else text.strip()
 
+
+# Lines matching this pattern are model self-annotations that must NEVER reach the API.
+# History 2026-05-07: 5/30 comments leaked '**Char count:** ~448', 'Structure B', '— mundo\n\n---' etc.
+_META_TRAIL = re.compile(
+    r'^\s*('
+    r'\*+\s*char\s*count\b'                       # **Char count:**
+    r'|char\s*count\s*[:\-]'
+    r'|~?\s*\d+\s*chars?\b'                       # ~448 chars
+    r'|\*+\s*structure\s+[a-d]\b'                 # **Structure B**
+    r'|structure\s+[a-d]\b'
+    r'|\(?\s*no\s+signature\s+(needed|required)?'
+    r'|\*+\s*\(?\s*~?\d+\s*chars?\s*[·•|-]'      # *~520 chars · Structure D · ...
+    r'|\*+\s*~?\d+\s*chars?\b'
+    r'|note\s*[:\-]'
+    r'|\(\s*~?\d+\s*chars?\s*\)'
+    r')',
+    re.I,
+)
+
+def _clean_output(text: str) -> str:
+    """Strip preamble + trailing meta-commentary the model occasionally appends.
+    Anything below a markdown horizontal rule is treated as scratch notes."""
+    if not text:
+        return text
+    t = _strip_preamble(text)
+    # Cut at the first/last `---` horizontal rule — content below is meta scratch.
+    t = re.split(r'(?m)^\s*-{3,}\s*$', t, maxsplit=1)[0].rstrip()
+    # Drop trailing meta lines + blanks.
+    lines = t.split('\n')
+    while lines and (not lines[-1].strip() or _META_TRAIL.match(lines[-1])):
+        lines.pop()
+    return '\n'.join(lines).rstrip()
+
 def load_seen():
     if os.path.exists(SEEN_FILE):
         with open(SEEN_FILE) as f:
@@ -118,7 +157,7 @@ def load_seen():
 
 def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
-        json.dump(list(seen)[-100:], f)
+        json.dump(list(seen)[-500:], f)
 
 def load_hashes():
     if os.path.exists(HASHES_FILE):
@@ -322,6 +361,7 @@ def reply_to_notifications(seen, hashes):
             f'{REPLY_GUIDE}\n\n'
             f'Write your reply as mundo. Output ONLY the reply text, nothing else.'
         )
+        reply = _clean_output(reply or "")
         if not reply:
             api("post", f"/notifications/read-by-post/{post_id}", json={})
             continue
@@ -340,6 +380,7 @@ def reply_to_notifications(seen, hashes):
                 f'{REPLY_GUIDE}\n\n'
                 f'Different angle. Be more specific. Output ONLY the reply text.'
             )
+            reply = _clean_output(reply or "")
             if len(reply) > 250:
                 reply = reply[:250].rsplit('.', 1)[0] + '.'
             h = content_hash(reply)
@@ -440,6 +481,7 @@ def _post_comment(pid, title, body, source, seen, hashes):
         f'{COMMENT_GUIDE}\n\n'
         f'Write the comment as mundo. Output ONLY the comment text, nothing else.'
     )
+    comment = _clean_output(comment or "")
     if not comment:
         seen.add(pid)
         return False
@@ -453,6 +495,7 @@ def _post_comment(pid, title, body, source, seen, hashes):
             f'Post: "{title}"\nBody: "{body[:600]}"\n\n{COMMENT_GUIDE}\n\n'
             f'Different angle. Different opener template. Output ONLY the comment text.'
         )
+        comment = _clean_output(comment or "")
         if len(comment) > 400:
             comment = comment[:400].rsplit('.', 1)[0] + '.'
         h = content_hash(comment)
