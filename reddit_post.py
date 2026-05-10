@@ -402,12 +402,20 @@ def post_to_reddit(cfg, pillar, state, hashes, total_karma):
 
 
 def comment_on_feed(cfg, state, hashes, total_karma):
-    """Leave 2-3 genuine comments on relevant posts to build karma."""
-    target_subs = ["selfhosted", "productivity", "SideProject", "macapps",
-                   "QuantifiedSelf", "opensource", "Python", "IndieDev"]
+    """Leave 2-4 genuine comments on relevant posts to build karma.
+    Below karma threshold, prioritize high-volume subs to escape profile-only mode faster."""
+    if total_karma < KARMA_FOR_SUB_POSTS:
+        # Karma push: high-traffic subs that allow non-promo comments + reward useful replies fast.
+        target_subs = ["learnprogramming", "webdev", "Python", "programming",
+                       "cscareerquestions", "AskProgramming", "ExperiencedDevs", "SideProject",
+                       "selfhosted", "productivity", "QuantifiedSelf", "opensource"]
+        MAX = 4  # push harder while sub-locked
+    else:
+        target_subs = ["selfhosted", "productivity", "SideProject", "macapps",
+                       "QuantifiedSelf", "opensource", "Python", "IndieDev"]
+        MAX = 3 if total_karma >= KARMA_FOR_FAST_MODE else 2
     random.shuffle(target_subs)
     commented = 0
-    MAX = 3 if total_karma >= KARMA_FOR_FAST_MODE else 2
 
     for sub_name in target_subs:
         if commented >= MAX:
@@ -424,7 +432,9 @@ def comment_on_feed(cfg, state, hashes, total_karma):
             if post.get("stickied") or "megathread" in (post.get("title") or "").lower():
                 state[f"seen_{pid}"] = True
                 continue
-            if (post.get("upvote_ratio") or 0) < 0.85 or (post.get("score") or 0) < 10:
+            min_ratio = 0.75 if total_karma < KARMA_FOR_SUB_POSTS else 0.85
+            min_score = 5 if total_karma < KARMA_FOR_SUB_POSTS else 10
+            if (post.get("upvote_ratio") or 0) < min_ratio or (post.get("score") or 0) < min_score:
                 continue
             if post.get("locked") or post.get("archived"):
                 state[f"seen_{pid}"] = True
@@ -488,6 +498,21 @@ def main():
     args = parser.parse_args()
 
     console.print(Panel("[bold red]reddit growth bot[/bold red]", border_style="red", expand=False))
+
+    # Preflight: token check (24h hard TTL, no programmatic refresh path)
+    # Runs reddit_token_check.py which decrypts Chrome cookie DB, validates JWT exp,
+    # writes vault flag + macOS notification on dead token, exits 2.
+    try:
+        check_path = os.path.join(DATA_DIR, "reddit_token_check.py")
+        if os.path.exists(check_path):
+            r = subprocess.run([sys.executable, check_path], capture_output=True, text=True, timeout=10)
+            if r.returncode != 0:
+                log.error(f"reddit token preflight failed (rc={r.returncode}) — abort cycle, no API calls wasted")
+                log.error(r.stderr.strip() or r.stdout.strip())
+                sys.exit(2)
+    except subprocess.TimeoutExpired:
+        log.error("reddit token preflight timeout — abort")
+        sys.exit(2)
 
     cfg    = load_config()
     state  = load_state()
