@@ -215,16 +215,21 @@ _MUL_HINTS = ("times","multiplied")
 
 def _try_local_solve(challenge):
     """Best-effort deterministic solve. Returns '55.00' string or None when unsure.
-    Strips non-letters, then merges adjacent fragments to recover number-words."""
+    Strips non-letters, then merges adjacent fragments to recover number-words.
+    Tries 4-3-2 token merges (handles aggressive Lobster fragmentation like 't hi r ty')."""
     norm = re.sub(r"[^A-Za-z\s]", "", challenge).lower()
     norm = re.sub(r"\s+", " ", norm).strip()
     tokens = norm.split(" ")
     fixed, i = [], 0
     while i < len(tokens):
-        merged2 = (tokens[i] + tokens[i+1]) if i + 1 < len(tokens) else None
-        if merged2 and merged2 in _NUM_WORDS:
-            fixed.append(merged2); i += 2; continue
-        fixed.append(tokens[i]); i += 1
+        matched = False
+        for n in (4, 3, 2):
+            if i + n <= len(tokens):
+                merged = "".join(tokens[i:i+n])
+                if merged in _NUM_WORDS:
+                    fixed.append(merged); i += n; matched = True; break
+        if not matched:
+            fixed.append(tokens[i]); i += 1
     flat = " ".join(fixed)
     nums, cur = [], []
     for w in re.findall(r"[a-z]+", flat):

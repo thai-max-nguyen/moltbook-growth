@@ -386,16 +386,19 @@ def _try_local_solve(challenge):
     """
     norm = re.sub(r"[^A-Za-z\s]", "", challenge).lower()
     norm = re.sub(r"\s+", " ", norm).strip()
-    # Greedy fix: try joining adjacent fragments to form known number words
+    # Greedy fix: try 4-3-2 token merges to recover number-words from aggressive Lobster fragmentation
     tokens = norm.split(" ")
     fixed = []
     i = 0
     while i < len(tokens):
-        # try 2-token then 1-token merge into a known number word
-        merged2 = (tokens[i] + tokens[i+1]) if i + 1 < len(tokens) else None
-        if merged2 and merged2 in _NUM_WORDS:
-            fixed.append(merged2); i += 2; continue
-        fixed.append(tokens[i]); i += 1
+        matched = False
+        for n in (4, 3, 2):
+            if i + n <= len(tokens):
+                merged = "".join(tokens[i:i+n])
+                if merged in _NUM_WORDS:
+                    fixed.append(merged); i += n; matched = True; break
+        if not matched:
+            fixed.append(tokens[i]); i += 1
     flat = " ".join(fixed)
     # Walk and accumulate consecutive number-word groups → integer
     nums = []
