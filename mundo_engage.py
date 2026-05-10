@@ -172,29 +172,34 @@ def save_hashes(hashes):
 _AUTH_ERRORS = ("not logged in", "please run /login", "authentication", "unauthorized")
 
 def _call_model(model, prompt, timeout=120):
-    try:
-        r = subprocess.run(
-            [CLAUDE_BIN, "--print", "--system-prompt", PERSONA, "--model", model, prompt[:2000]],
-            capture_output=True, text=True, timeout=timeout, env=env_with_token()
-        )
-        out = r.stdout.strip()
-        if any(e in out.lower() for e in _AUTH_ERRORS):
-            console.log(f"[red]✗ Claude CLI auth error — check USER env in cron[/red]")
-            return ""
-        lines = out.split('\n')
-        cleaned = '\n'.join(l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)).strip()
-        return _strip_preamble(cleaned)
-    except subprocess.TimeoutExpired:
-        console.log(f"[yellow]⚠ model timeout[/yellow] model={model} prompt_len={len(prompt)}")
-        return ""
+    """Call Claude CLI with 1 retry on timeout. Effective max wait: 2× timeout."""
+    for attempt in range(2):
+        try:
+            r = subprocess.run(
+                [CLAUDE_BIN, "--print", "--system-prompt", PERSONA, "--model", model, prompt[:2000]],
+                capture_output=True, text=True, timeout=timeout, env=env_with_token()
+            )
+            out = r.stdout.strip()
+            if any(e in out.lower() for e in _AUTH_ERRORS):
+                console.log(f"[red]✗ Claude CLI auth error — check USER env in cron[/red]")
+                return ""
+            lines = out.split('\n')
+            cleaned = '\n'.join(l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)).strip()
+            return _strip_preamble(cleaned)
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                console.log(f"[yellow]⚠ model timeout x2[/yellow] model={model} prompt_len={len(prompt)}")
+                return ""
+            console.log(f"[yellow]⚠ model timeout, retry[/yellow] model={model}")
+    return ""
 
-def haiku(prompt, timeout=60):
+def haiku(prompt, timeout=30):
     return _call_model("claude-haiku-4-5-20251001", prompt, timeout)
 
-def sonnet(prompt, timeout=90):
+def sonnet(prompt, timeout=35):
     return _call_model("claude-sonnet-4-6", prompt, timeout)
 
-def opus(prompt, timeout=180):
+def opus(prompt, timeout=60):
     """Use Opus 4.7 for high-quality comment generation — higher upvote rate."""
     return _call_model("claude-opus-4-7", prompt, timeout)
 
