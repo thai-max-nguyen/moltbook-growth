@@ -235,13 +235,19 @@ def _try_local_solve(challenge):
             else: chunk += v
         return total + chunk
     ints = [_to_int(g) for g in nums]
+    has_op = any(h in flat for h in (_SUB_HINTS + _ADD_HINTS + _MUL_HINTS))
+    if len(ints) == 1 and not has_op:
+        # Single-number captcha: "lobster claw exerts thirty newtons" → 30
+        return f"{float(ints[0]):.2f}"
     if len(ints) < 2:
         return None
     a, b = ints[0], ints[1]
     if any(h in flat for h in _SUB_HINTS): result = a - b
     elif any(h in flat for h in _MUL_HINTS): result = a * b
     elif any(h in flat for h in _ADD_HINTS): result = a + b
-    else: return None
+    else:
+        # No op hint but 2+ numbers — assume add (most common Lobster captcha pattern)
+        result = a + b
     return f"{float(result):.2f}"
 
 def solve_captcha(verification_code, challenge):
@@ -250,21 +256,32 @@ def solve_captcha(verification_code, challenge):
     answer_str = _try_local_solve(challenge)
     source = "local"
     if answer_str is None:
+        # Pre-clean: strip injected punctuation noise, keep letters/digits/spaces only
+        cleaned = re.sub(r"[^A-Za-z0-9\s]", "", challenge)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
         prompt = (
-            "Decode this obfuscated text by stripping non-letters, lowercasing, "
-            "and rejoining number-word fragments split by injected spaces "
-            "(e.g. 'twen ty'='twenty', 'fif teen'='fifteen'). Find the arithmetic "
-            "expression and compute. Return ONLY the numeric answer with exactly "
-            "2 decimal places (e.g. '55.00'). No explanation.\n\n"
-            f"Challenge: {challenge}"
+            "Decode obfuscated math in this challenge. Steps: (1) lowercase, (2) merge "
+            "fragments split by spaces (eg 'twen ty'='twenty'), (3) find ALL numbers "
+            "(digits or words), (4) if only ONE number, answer is THAT number, (5) if "
+            "TWO numbers + operator (plus/minus/times/and/gains/loses), compute. "
+            "Return ONLY answer with exactly 2 decimal places (eg '32.00'). No prose.\n\n"
+            f"Cleaned: {cleaned}\n"
+            f"Original: {challenge}"
         )
-        try:
-            r = subprocess.run(
-                [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001", prompt],
-                capture_output=True, text=True, timeout=60, env=env_with_token()
-            )
-        except subprocess.TimeoutExpired:
-            console.log("[red]✗ captcha LLM timeout 60s[/red]")
+        r = None
+        for attempt in range(2):
+            try:
+                r = subprocess.run(
+                    [CLAUDE_BIN, "--print", "--model", "claude-haiku-4-5-20251001", prompt],
+                    capture_output=True, text=True, timeout=25, env=env_with_token()
+                )
+                break
+            except subprocess.TimeoutExpired:
+                if attempt == 1:
+                    console.log("[red]✗ captcha LLM timeout 25s x2[/red]")
+                    return False
+                console.log("[yellow]⚠ captcha LLM retry (timeout 25s)[/yellow]")
+        if r is None:
             return False
         lines = [l for l in r.stdout.strip().split('\n')
                  if not re.match(r'^[⚡🎯🧠].*\*\*', l)]
@@ -789,6 +806,17 @@ def main():
     if not _acquire_lock():
         raise SystemExit(0)
     console.print(Panel("[bold magenta]mundo · engage[/bold magenta]", border_style="magenta", expand=False))
+
+    # Preflight: 5s probe — bail fast if network/server dead (saves ~7min on offline cycles).
+    try:
+        r0 = requests.get(f"{BASE}/agents/mundo/profile", headers=H, timeout=5)
+        if r0.status_code >= 500:
+            console.log(f"[red]✗ preflight: server {r0.status_code} — abort cycle[/red]")
+            raise SystemExit(2)
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
+        console.log(f"[red]✗ preflight: network dead ({type(e).__name__}) — abort cycle, no actions wasted[/red]")
+        raise SystemExit(2)
+
     seen   = load_seen()
     hashes = load_hashes()
     t0     = time.time()

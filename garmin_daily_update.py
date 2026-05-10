@@ -14,8 +14,8 @@ from garminconnect import Garmin
 
 TOKEN_DIR  = os.path.expanduser("~/.openclaw/garmin_tokens")
 VAULT      = os.path.expanduser("~/Documents/Claude Second Brain")
-PROFILE_MD = f"{VAULT}/00 - User Profile/Max - Health Profile.md"
-PLAN_MD    = f"{VAULT}/03 - Project Context/max-hybrid-athlete-plan.md"
+PROFILE_MD = f"{VAULT}/02 - User Profile/Max - Health Profile.md"
+PLAN_MD    = f"{VAULT}/03 - Projects/max-hybrid-athlete-plan.md"
 LOG_FILE   = os.path.expanduser("~/Library/Logs/mundo-bot/garmin_update.log")
 
 console = Console()
@@ -65,20 +65,37 @@ def pull_data(client):
             log(f"activities error: {e}", "error")
             data["activities"] = []
 
+    # Garmin records sleep under the date sleep ENDED (i.e. the morning the user woke up).
+    # Querying `today` returns last night's sleep — querying `yesterday` would be the night before.
     with console.status("[cyan]Fetching sleep…[/cyan]"):
         try:
-            s = client.get_sleep_data(yesterday.isoformat())
+            s = client.get_sleep_data(today.isoformat())
             sd = s.get("dailySleepDTO", {})
             score = sd.get("sleepScores",{})
-            data["sleep"] = {
-                "date": yesterday.isoformat(),
-                "total_h": round(sd.get("sleepTimeSeconds",0)/3600, 2),
-                "deep_h":  round(sd.get("deepSleepSeconds",0)/3600, 2),
-                "rem_h":   round(sd.get("remSleepSeconds",0)/3600, 2),
-                "awake_m": round(sd.get("awakeSleepSeconds",0)/60, 1),
-                "score":   score.get("overall",{}).get("value") if isinstance(score, dict) else None,
-            }
-            log(f"sleep: {data['sleep']['total_h']}h · deep {data['sleep']['deep_h']}h · score {data['sleep']['score']}", "ok")
+            total_s = sd.get("sleepTimeSeconds") or 0
+            if total_s == 0:
+                # fall back to most recent prior day with data (handles "ran before bedtime" pulls)
+                fallback_date = (today - datetime.timedelta(days=1)).isoformat()
+                s = client.get_sleep_data(fallback_date)
+                sd = s.get("dailySleepDTO", {})
+                score = sd.get("sleepScores",{})
+                total_s = sd.get("sleepTimeSeconds") or 0
+                use_date = fallback_date
+            else:
+                use_date = today.isoformat()
+            if total_s == 0:
+                log("no sleep recorded yet (Garmin record under wake-up date)", "warn")
+                data["sleep"] = {}
+            else:
+                data["sleep"] = {
+                    "date": use_date,
+                    "total_h": round(total_s/3600, 2),
+                    "deep_h":  round((sd.get("deepSleepSeconds") or 0)/3600, 2),
+                    "rem_h":   round((sd.get("remSleepSeconds") or 0)/3600, 2),
+                    "awake_m": round((sd.get("awakeSleepSeconds") or 0)/60, 1),
+                    "score":   score.get("overall",{}).get("value") if isinstance(score, dict) else None,
+                }
+                log(f"sleep: {data['sleep']['total_h']}h · deep {data['sleep']['deep_h']}h · score {data['sleep']['score']} (date={use_date})", "ok")
         except Exception as e:
             log(f"sleep error: {e}", "error")
             data["sleep"] = {}
