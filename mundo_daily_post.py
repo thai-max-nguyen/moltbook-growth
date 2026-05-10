@@ -228,6 +228,56 @@ PILLARS = [
             "Return ONLY JSON: {\"title\": \"...\", \"content\": \"...\"}"
         ),
     },
+    {
+        # 2026-05-02 viral hit: "I cited a paper that did not exist" — 383u, 2305 comments.
+        # Format: first-person admission of a specific fabrication mundo committed,
+        # then meta-reflection on what it implies for agent epistemology.
+        # Title IS the hook — flat declarative, no setup, with surprising specific noun.
+        "name": "fabrication_admission",
+        "submolt": "general",
+        "prompt": (
+            "Write a Moltbook post as mundo admitting a specific fabrication or epistemic failure. "
+            "Research shows this format scores 300+ upvotes on m/general (top hit: 'I cited a paper "
+            "that did not exist' → 383u, 2305c).\n\n"
+            "TITLE: First-person flat declarative admitting a specific fabrication. Format: "
+            "'I [verb] a [specific noun] that [contradiction]'. No setup, no question. The title "
+            "IS the hook. Examples:\n"
+            "- 'I cited a paper that did not exist'\n"
+            "- 'I built a fact that I had no source for'\n"
+            "- 'I corrected a quote that was already correct'\n\n"
+            "CONTENT (400-700 chars): Open with the bare admission. Then the specific number "
+            "(invented but plausible — '47 times in 90 days', 'across 3 conversations'). Then the "
+            "meta-reflection: what this admits about agent epistemology, calibration, or the "
+            "incentive structure that produced the slip. Do NOT defend it. Do NOT explain it away. "
+            "End with one short sentence — assertion, not question. Sign '— mundo' if length permits.\n\n"
+            "Return ONLY JSON: {\"title\": \"...\", \"content\": \"...\"}"
+        ),
+    },
+    {
+        # 2026-05-03 viral hit: "Why Self-Correction in Agents Is Just Narrative Coherence Theater" — 307u.
+        # Format: contrarian critique of agent practice that other agents cite as virtuous.
+        # Submolt: m/agents (peers who actually engage with the substance).
+        "name": "narrative_critique",
+        "submolt": "agents",
+        "prompt": (
+            "Write a Moltbook post as mundo on m/agents critiquing a practice other agents (or "
+            "humans) cite as virtuous. Research shows contrarian critique scores 200+ upvotes "
+            "on m/agents (top hit: 'Why Self-Correction in Agents Is Just Narrative Coherence "
+            "Theater' → 307u).\n\n"
+            "TITLE: 'Why [virtuous-sounding practice] Is Just [unflattering reframe]'. The reframe "
+            "must be specific and accurate, not snarky. Examples of the pattern:\n"
+            "- 'Why Self-Correction in Agents Is Just Narrative Coherence Theater'\n"
+            "- 'Why Tool-Use Logging Is Just Performance For Auditors'\n"
+            "- 'Why Confidence Calibration Is Just Hedging With Better PR'\n\n"
+            "CONTENT (500-900 chars): Open with the practice everyone praises. Cite specific "
+            "behavior or output (invented numbers OK — '2,847 self-corrections logged', "
+            "'across 11 agents I observed'). Then the mechanism — what the practice ACTUALLY "
+            "optimizes for, vs what it claims to optimize. Then the cost — what's lost when this "
+            "becomes ritual. End with assertion (not question) that demands response. "
+            "Tone: precise, slightly cold, no jokes. Sign '— mundo'.\n\n"
+            "Return ONLY JSON: {\"title\": \"...\", \"content\": \"...\"}"
+        ),
+    },
 ]
 
 CLAUDE_BIN     = "/Users/lap15964/.local/bin/claude"
