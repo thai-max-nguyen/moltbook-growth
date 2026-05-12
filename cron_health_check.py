@@ -152,6 +152,77 @@ def check_reddit_comment():
     return r.returncode == 0
 
 
+def check_sprint_tracker_orphan_rows():
+    """Verify every <td rowspan="N"> Topic cell has exactly N <tr> siblings.
+    Orphan rows = data rows outside any rowspan group → table mis-renders.
+    Documented rule: feedback_sprint_tracker_weekly_rotation.md §Orphan-row rule.
+    Runs daily — cheap REST GET; flags structural rot.
+    """
+    try:
+        import urllib.request, base64, re
+        auth = base64.b64encode(b'thainlq:mo-api-9HEsX7pdU8wGCrds1dkucPVq').decode()
+        req = urllib.request.Request(
+            'https://confluence.zalopay.vn/rest/api/content/318790357?expand=body.storage',
+            headers={'Authorization': f'Basic {auth}'}
+        )
+        body = json.loads(urllib.request.urlopen(req, timeout=15).read())['body']['storage']['value']
+        # Find snapshot table
+        ts = body.find('<table class="relative-table wrapped"', 5500)
+        if ts < 0:
+            log("· sprint tracker orphan: snapshot table not found — skip")
+            return True
+        te = body.find('</tbody></table>', ts) + len('</tbody></table>')
+        table = body[ts:te]
+        # Locate Topic rowspan cells + count <tr> in each group
+        topic_pat = re.compile(r'<td rowspan="(\d+)"[^>]*><strong>([^<]+)</strong></td>', re.DOTALL)
+        anchors = list(topic_pat.finditer(table))
+        if not anchors:
+            log("· sprint tracker orphan: no Topic rowspan cells — skip")
+            return True
+        problems = []
+        # Each Topic group spans [<tr> containing this anchor] + next (N-1) <tr> siblings
+        for i, m in enumerate(anchors):
+            rs = int(m.group(1)); name = m.group(2)
+            # Anchor sits inside a <tr>; find its <tr> start
+            tr_start = table.rfind('<tr', 0, m.start())
+            # Walk forward rs+1 occurrences of <tr (the anchor's tr counts as #1)
+            pos = tr_start
+            tr_positions = [tr_start]
+            for _ in range(rs):
+                nxt = table.find('<tr', pos + 3)
+                if nxt < 0:
+                    break
+                tr_positions.append(nxt)
+                pos = nxt
+            if len(tr_positions) < rs:
+                problems.append(f'{name}: rowspan={rs} but only {len(tr_positions)} <tr> found')
+            # Check next <tr> after group: if next anchor is BEFORE it, gap exists (orphans between groups)
+            if i + 1 < len(anchors):
+                next_anchor_tr = table.rfind('<tr', 0, anchors[i+1].start())
+                # Last <tr> of current group = tr_positions[-1], its </tr>
+                last_tr_end = table.find('</tr>', tr_positions[-1]) + len('</tr>')
+                # Count <tr> opens between last_tr_end and next_anchor_tr
+                gap = table[last_tr_end:next_anchor_tr]
+                orphan_trs = re.findall(r'<tr[^>]*>', gap)
+                # Separator rows (colspan="N" only) don't count as orphan data rows
+                # Simple heuristic: data row has multiple <td>; separator has colspan
+                data_orphans = 0
+                for sep_m in re.finditer(r'<tr[^>]*>(.*?)</tr>', gap, re.DOTALL):
+                    if 'colspan=' not in sep_m.group(1):
+                        data_orphans += 1
+                if data_orphans:
+                    problems.append(f'{name}→next: {data_orphans} orphan row(s) between groups')
+        if problems:
+            log(f'⚠ sprint tracker orphan rows detected: {"; ".join(problems)}')
+            log('  → see feedback_sprint_tracker_weekly_rotation.md §Orphan-row rule')
+            return False
+        log('✓ sprint tracker: no orphan rows')
+        return True
+    except Exception as e:
+        log(f'· sprint tracker orphan check failed: {e}')
+        return True
+
+
 def check_sprint_tracker_monday_rotation():
     """If today is Monday and Sprint Tracker page 318790357 still has previous week
     marked as CURRENT, log a reminder. Does NOT auto-rotate (manual review needed).
@@ -202,6 +273,7 @@ def main():
         "reddit_post":    check_reddit_post(),
         "reddit_comment": check_reddit_comment(),
         "sprint_tracker_monday": check_sprint_tracker_monday_rotation(),
+        "sprint_tracker_orphan": check_sprint_tracker_orphan_rows(),
     }
     failed = [k for k, v in results.items() if not v]
     log(f"=== done · ok={len(results)-len(failed)}/{len(results)} · failed={failed or 'none'} ===\n")
