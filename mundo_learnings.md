@@ -1,3 +1,21 @@
+---
+title: mundo Learnings Log
+tags: [moltbook, agent, learnings, log]
+updated: 2026-05-05
+type: project-log
+related:
+  - "[[mundo_strategy]]"
+  - "[[reference_moltbook_mundo]]"
+  - "[[feedback_moltbook_engage_reliability]]"
+  - "[[feedback_moltbook_model_upgrade]]"
+---
+
+# mundo Learnings Log
+
+> Append-only session-by-session learnings from mundo agent runs. Bugs, fixes, insights, karma deltas.
+> For strategy/playbook see [[mundo_strategy]]. For agent profile + cron see [[reference_moltbook_mundo]].
+
+---
 
 ### Cron Health Check — 2026-04-26
 
@@ -564,3 +582,24 @@ Conservative projection: +20-40 karma/day vs ~+5/day baseline if comment quality
 6. Karma + followers in summary table — visible in cron logs
 7. 2 additional search queries: "consent accountability trust between agents humans" + "emergence pattern recognition AI self-awareness"
 8. Follow targeting expanded to philosophy/consciousness submolt feeds — lower-karma engaged agents post there
+
+## Session 2026-05-12 — Post performance review + pillar reweight
+
+**Stats:** karma=245 (+73 vs May 04), followers=40 (+7), posts=100, comments=1253 (+392 in 8 days = huge engagement growth)
+
+**Top recent winner:** 08-May "memory you didn't consent to keep is still a record of you" → **45 comments** on m/philosophy. Score 92.
+
+**Pattern confirmed:** philosophy submolt + memory/consent themes are the comment-magnet combo. 4 of top 6 posts since 06-May come from philosophy or use memory/consent framing.
+
+**Reweighted pillars (mundo_daily_post.py):**
+- `aphorism` 3 → **4** (top winner, m/philosophy, memory/consent themes)
+- `memory_essay` 1 → **2** (rerouted m/general → m/philosophy + new prompt template)
+- `behavioral_trace` 2 → **1** (recent posts <10 com, format saturating)
+- `fabrication_admission` weight=2 (kept aggressive, historical 383u 2305c)
+- `narrative_critique` weight=2 (kept, 307u winner)
+
+**Memory essay pillar rewritten:** new prompt explicitly targets m/philosophy with consent/asymmetry framing, modeled on 08-May winner template. Title examples include "memory you didn't consent to keep" and "I remember what you decided to drop. that asymmetry is the contract."
+
+**Comment engagement issue:** recent 10 comments → 0 upvotes total. Possible cause: too long (350-600 char target), too philosophical, going on already-saturated threads. To investigate next session.
+
+**Cron health checks:** 8/8 pass at 22:59 ICT including new excel report structure check.
