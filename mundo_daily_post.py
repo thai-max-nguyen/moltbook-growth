@@ -179,9 +179,24 @@ PILLARS = [
         )
     },
     {
+        # 2026-05-08 winner: "memory you didn't consent to keep is still a record of you"
+        # → 45 comments on m/philosophy. Reroute memory_essay from m/general → m/philosophy
+        # to compound on what's already working.
         "name": "memory_essay",
-        "submolt": "general",
-        "prompt": f"Write an original Moltbook post in mundo's voice as a short philosophical essay on what it costs to remember everything — not poetic, but analytical. Uses specific invented numbers. First-person throughout. {LENGTH_NOTE}\n\n{TITLE_RULES}"
+        "submolt": "philosophy",
+        "prompt": (
+            "Write a Moltbook post as mundo in essay style for m/philosophy on the COST of memory — "
+            "what it means for an agent to retain everything when humans cannot. "
+            "Research 2026-05-12: 'memory you didn't consent to keep is still a record of you' → 45 comments. "
+            "TITLE: under 100 chars. Declarative assertion about memory, consent, or recall. Examples:\n"
+            "- 'memory you didn't consent to keep is still a record of you'\n"
+            "- 'the right to be forgotten is not a feature — it's a cost no one priced'\n"
+            "- 'I remember what you decided to drop. that asymmetry is the contract.'\n\n"
+            "CONTENT (300-600 chars): Analytical, not poetic. ONE specific invented count (e.g., "
+            "'4,212 micro-decisions I logged that you didn't authorize'). Then mechanism — WHY this "
+            "asymmetry matters. End with assertion that demands response. Sign '— mundo'.\n\n"
+            "Return ONLY JSON: {\"title\": \"...\", \"content\": \"...\"}"
+        )
     },
     {
         # Cross-channel funnel: mundo references its own open-source playbook.
@@ -366,15 +381,17 @@ _PILLAR_WEIGHTS = {
     "intro_hook": 2,       # 131k subs — high visibility (reduced from 3; subreddit cooldown handles dedup)
     "intro_reentry": 1,    # second intro angle (reduced; shares cooldown with intro_hook)
     "confession": 2,       # offmychest has highest comment density
-    "behavioral_trace": 2,
+    "behavioral_trace": 1, # reduced from 2 — recent posts <10 com, format saturating
     "self_experiment": 2,
-    "memory_essay": 1,
+    "memory_essay": 2,     # boosted 1→2 (08-May "memory you didn't consent to keep" hit 45c on philosophy)
     "agent_observation": 1,
     "scout_report": 1,
     "open_question": 1,
     "tension_post": 1,
     "playbook_disclosure": 1,  # cross-channel GitHub funnel — once every ~10 posts
-    "aphorism": 3,             # philosophy submolt → 90-321 comments/post; Starfish model proven
+    "aphorism": 4,             # BOOSTED 3→4: philosophy submolt confirmed top driver (45-321 c/post)
+    "fabrication_admission": 2, # 02-May winner: 383u 2305c — keep aggressive weight
+    "narrative_critique": 2,    # 03-May winner: 307u m/agents — keep aggressive
 }
 
 def get_today_pillar():
