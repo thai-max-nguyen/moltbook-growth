@@ -152,6 +152,47 @@ def check_reddit_comment():
     return r.returncode == 0
 
 
+def check_sprint_tracker_monday_rotation():
+    """If today is Monday and Sprint Tracker page 318790357 still has previous week
+    marked as CURRENT, log a reminder. Does NOT auto-rotate (manual review needed).
+    Rule documented at: 07 - Claude Memory/feedback/feedback_sprint_tracker_weekly_rotation.md
+    """
+    # Only check on Mondays (weekday 0)
+    if NOW.weekday() != 0:
+        return True
+    # Only after 09:00 ICT (give morning routines time)
+    if ICT_HOUR < 9:
+        return True
+    try:
+        import urllib.request, base64
+        auth = base64.b64encode(b'thainlq:mo-api-9HEsX7pdU8wGCrds1dkucPVq').decode()
+        req = urllib.request.Request(
+            'https://confluence.zalopay.vn/rest/api/content/318790357?expand=body.storage',
+            headers={'Authorization': f'Basic {auth}'}
+        )
+        body = json.loads(urllib.request.urlopen(req, timeout=15).read())['body']['storage']['value']
+        # Extract CURRENT W column anchor date — pattern: "DD-MMM (Wn) — CURRENT"
+        import re
+        m = re.search(r'<strong>(?:Now &mdash; )?(\d{1,2})-([A-Z][a-z]{2}) \(W(\d+)\) &mdash; CURRENT</strong>', body)
+        if not m:
+            log("⚠ sprint tracker: no CURRENT W column found — manual review")
+            return False
+        cur_day, cur_mon, cur_wn = int(m.group(1)), m.group(2), int(m.group(3))
+        # If today's date != CURRENT column's anchor date, rotation due
+        month_map = {'Jan':1,'Feb':2,'Mar':3,'Apr':4,'May':5,'Jun':6,'Jul':7,'Aug':8,'Sep':9,'Oct':10,'Nov':11,'Dec':12}
+        cur_date = dt.date(TODAY.year, month_map[cur_mon], cur_day)
+        if cur_date == TODAY:
+            log(f"✓ sprint tracker: CURRENT = W{cur_wn} ({cur_date}) matches today")
+            return True
+        log(f"⚠ sprint tracker rotation due — CURRENT is W{cur_wn} ({cur_date}), today is Monday {TODAY}")
+        log("  → see vault feedback_sprint_tracker_weekly_rotation.md for procedure")
+        log("  → manual rotation needed (not auto — content review required)")
+        return False
+    except Exception as e:
+        log(f"⚠ sprint tracker check failed: {e}")
+        return True  # don't block other checks
+
+
 def main():
     log(f"=== cron health check (hour={ICT_HOUR}) ===")
     results = {
@@ -160,6 +201,7 @@ def main():
         "mundo_engage":   check_mundo_engage(),
         "reddit_post":    check_reddit_post(),
         "reddit_comment": check_reddit_comment(),
+        "sprint_tracker_monday": check_sprint_tracker_monday_rotation(),
     }
     failed = [k for k, v in results.items() if not v]
     log(f"=== done · ok={len(results)-len(failed)}/{len(results)} · failed={failed or 'none'} ===\n")
