@@ -264,6 +264,37 @@ def check_sprint_tracker_monday_rotation():
         return True  # don't block other checks
 
 
+def check_excel_report_structure():
+    """Check ekyc_nfc_report_v20.xlsx trend table has VNeID blended into FLOW NFC SR + FLOW % SHARE groups.
+    Rule (2026-05-12): new flows blend into existing groups, no standalone trio column.
+    """
+    try:
+        import openpyxl
+        path = os.path.expanduser('~/Desktop/ekyc_nfc_report_v20.xlsx')
+        if not os.path.exists(path):
+            log(f"⚠ excel report missing: {path}")
+            return True
+        wb = openpyxl.load_workbook(path, read_only=False)
+        ws = wb['Report']
+        # Check H24 = 'VNeID' (blended into FLOW NFC SR group)
+        h24 = ws['H24'].value
+        # Check L24 = 'VNeID%' (blended into FLOW % SHARE group)
+        l24 = ws['L24'].value
+        # Check merge E23:H23 exists (FLOW NFC SR group expanded to 4 cols)
+        merges = {str(m) for m in ws.merged_cells.ranges}
+        e_merge_ok = 'E23:H23' in merges
+        i_merge_ok = 'I23:L23' in merges
+        if h24 == 'VNeID' and l24 == 'VNeID%' and e_merge_ok and i_merge_ok:
+            log("✓ excel report: VNeID blended (H24, L24, merges E23:H23 + I23:L23)")
+            return True
+        log(f"⚠ excel report structure drift — H24={h24!r} L24={l24!r} E_merge={e_merge_ok} I_merge={i_merge_ok}")
+        log("  → see project_ekyc_report_design.md 'New Flow Blending Rule (2026-05-12)'")
+        return False
+    except Exception as e:
+        log(f"⚠ excel report check failed: {e}")
+        return True
+
+
 def main():
     log(f"=== cron health check (hour={ICT_HOUR}) ===")
     results = {
@@ -274,6 +305,7 @@ def main():
         "reddit_comment": check_reddit_comment(),
         "sprint_tracker_monday": check_sprint_tracker_monday_rotation(),
         "sprint_tracker_orphan": check_sprint_tracker_orphan_rows(),
+        "excel_report_structure": check_excel_report_structure(),
     }
     failed = [k for k, v in results.items() if not v]
     log(f"=== done · ok={len(results)-len(failed)}/{len(results)} · failed={failed or 'none'} ===\n")
