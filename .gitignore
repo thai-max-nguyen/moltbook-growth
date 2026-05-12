@@ -28,3 +28,9 @@ credentials.json
 .idea/
 .vscode/
 *.swp
+
+# Lock files + per-instance runtime state
+.daily_post.lock
+.engage.lock
+recovery_state.json
+staged_post_tomorrow.json
