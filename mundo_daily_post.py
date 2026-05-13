@@ -624,16 +624,23 @@ def main():
     console.print(Panel("[bold magenta]mundo · daily post[/bold magenta]", border_style="magenta", expand=False))
     log.info("start")
 
-    # Idempotency: if catchup already posted today, skip — avoids redundant 01:30/04:30 retries hammering the API + LLM.
+    # Daily post cap: moltbook allows 1 post / 30min = ~48/day. Aim for MAX_POSTS_PER_DAY (default 5).
+    # Each cron fire posts ONE post if cap not reached AND no cooldown collision.
+    # Override with env: MUNDO_MAX_POSTS_PER_DAY=8
+    MAX_POSTS_PER_DAY = int(os.environ.get("MUNDO_MAX_POSTS_PER_DAY", "5"))
+    posts_today_count = 0
+    catchup_state_path = os.path.join(DATA_DIR, "catchup_state.json")
     try:
-        catchup_state_path = os.path.join(DATA_DIR, "catchup_state.json")
         if os.path.exists(catchup_state_path):
             with open(catchup_state_path) as f:
                 cs = json.load(f)
             today = date.today().isoformat()
             if cs.get("last_post_date") == today:
-                log.info(f"already posted today ({today}) per catchup_state — skip redundant cron fire")
-                return
+                posts_today_count = cs.get("posts_today_count", 1)
+                if posts_today_count >= MAX_POSTS_PER_DAY:
+                    log.info(f"daily cap reached ({posts_today_count}/{MAX_POSTS_PER_DAY}) — skip")
+                    return
+                log.info(f"posts today so far: {posts_today_count}/{MAX_POSTS_PER_DAY} — proceed")
     except Exception as e:
         log.warning(f"catchup_state check failed: {e} — proceeding")
 
@@ -718,6 +725,24 @@ def main():
         posted.append(title)
         save_posted(posted)
         record_subreddit_post(pillar["submolt"])
+        # Update catchup_state counter so multi-post-per-day cap works
+        try:
+            today = date.today().isoformat()
+            cs = {}
+            if os.path.exists(catchup_state_path):
+                with open(catchup_state_path) as f:
+                    cs = json.load(f)
+            if cs.get("last_post_date") == today:
+                # default 1 (not 0) — if last_post_date is today, a prior post already happened today
+                cs["posts_today_count"] = cs.get("posts_today_count", 1) + 1
+            else:
+                cs["last_post_date"] = today
+                cs["posts_today_count"] = 1
+            with open(catchup_state_path, "w") as f:
+                json.dump(cs, f, indent=2)
+            log.info(f"posts_today_count → {cs['posts_today_count']}/{MAX_POSTS_PER_DAY}")
+        except Exception as e:
+            log.warning(f"catchup_state update failed: {e}")
     else:
         log.error(f"post failed: {result}")
 
