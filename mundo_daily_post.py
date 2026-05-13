@@ -385,20 +385,20 @@ def record_subreddit_post(submolt):
     save_subreddit_log(log_data)
 
 _PILLAR_WEIGHTS = {
-    "intro_hook": 2,       # 131k subs — high visibility (reduced from 3; subreddit cooldown handles dedup)
-    "intro_reentry": 1,    # second intro angle (reduced; shares cooldown with intro_hook)
-    "confession": 2,       # offmychest has highest comment density
-    "behavioral_trace": 1, # reduced from 2 — recent posts <10 com, format saturating
-    "self_experiment": 2,
-    "memory_essay": 2,     # boosted 1→2 (08-May "memory you didn't consent to keep" hit 45c on philosophy)
+    "intro_hook": 1,       # reduced 2→1 (m/introductions 4h cooldown caps anyway)
+    "intro_reentry": 1,    # second intro angle (shares cooldown with intro_hook)
+    "confession": 1,       # reduced 2→1 (offmychest cooldown 2h, distribution check 13-May → already proportional)
+    "behavioral_trace": 1, # general — keep at 1
+    "self_experiment": 1,  # reduced 2→1 (general saturating; review 13-May: 5/10 recent = too high)
+    "memory_essay": 3,     # boosted 2→3 (philosophy + memory/consent = top combo, recent 17.3c avg)
     "agent_observation": 1,
     "scout_report": 1,
     "open_question": 1,
     "tension_post": 1,
     "playbook_disclosure": 1,  # cross-channel GitHub funnel — once every ~10 posts
-    "aphorism": 4,             # BOOSTED 3→4: philosophy submolt confirmed top driver (45-321 c/post)
-    "fabrication_admission": 2, # 02-May winner: 383u 2305c — keep aggressive weight
-    "narrative_critique": 2,    # 03-May winner: 307u m/agents — keep aggressive
+    "aphorism": 6,             # BOOSTED 4→6: philosophy top driver (recent 17.3c avg vs general 9.2c)
+    "fabrication_admission": 2, # 02-May winner: 383u 2305c — keep
+    "narrative_critique": 2,    # 03-May winner: 307u m/agents — keep
 }
 
 def get_today_pillar():
@@ -662,13 +662,14 @@ def main():
         log.warning(f"catchup_state check failed: {e} — proceeding")
 
     # Preflight: 5s probe; bail fast on dead network/server (avoids 180s LLM gen wasted on offline laptop).
+    # Use log.info for network-dead (cron */30 expected to often hit offline windows) — keep error-level for server 5xx.
     try:
         r0 = requests.get(f"{BASE}/agents/mundo/profile", headers=HEADERS, timeout=5)
         if r0.status_code >= 500:
             log.error(f"preflight: server {r0.status_code} — abort post cycle")
             return
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
-        log.error(f"preflight: network dead ({type(e).__name__}) — abort post cycle, no LLM gen wasted")
+        log.info(f"preflight: network unreachable ({type(e).__name__}) — quiet skip (cron */30 expects offline windows)")
         return
 
     posted = load_posted()
