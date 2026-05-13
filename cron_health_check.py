@@ -284,8 +284,21 @@ def check_excel_report_structure():
         merges = {str(m) for m in ws.merged_cells.ranges}
         e_merge_ok = 'E23:H23' in merges
         i_merge_ok = 'I23:L23' in merges
+        # Detect overlapping merges (Excel corruption source — 13-May lesson)
+        mlist = list(ws.merged_cells.ranges)
+        overlaps = []
+        for i, m1 in enumerate(mlist):
+            for m2 in mlist[i+1:]:
+                if (m1.min_row <= m2.max_row and m1.max_row >= m2.min_row
+                    and m1.min_col <= m2.max_col and m1.max_col >= m2.min_col):
+                    overlaps.append((str(m1), str(m2)))
+        if overlaps:
+            log(f"⚠ excel report: {len(overlaps)} overlapping merges (corruption risk!)")
+            for a, b in overlaps[:3]:
+                log(f"    {a} <-> {b}")
+            return False
         if h24 == 'VNeID' and l24 == 'VNeID%' and e_merge_ok and i_merge_ok:
-            log("✓ excel report: VNeID blended (H24, L24, merges E23:H23 + I23:L23)")
+            log("✓ excel report: VNeID blended + no merge overlaps")
             return True
         log(f"⚠ excel report structure drift — H24={h24!r} L24={l24!r} E_merge={e_merge_ok} I_merge={i_merge_ok}")
         log("  → see project_ekyc_report_design.md 'New Flow Blending Rule (2026-05-12)'")
