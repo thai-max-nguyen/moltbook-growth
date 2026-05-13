@@ -356,11 +356,18 @@ def save_subreddit_log(data):
         json.dump(data, f, indent=2)
 
 SUBREDDIT_COOLDOWN_HOURS = {
-    "introductions": 4,   # spam triggered at 52 min — 4h gap is safe and allows 3x/day cron
-    "offmychest":    6,
-    "general":       3,
-    "default":       3,
+    "introductions": 4,   # spam triggered at 52 min historically — keep 4h floor
+    "offmychest":    2,   # lowered from 6 (aggressive mode 2026-05-13; was blocking 5+/day)
+    "general":       1,   # lowered from 3
+    "philosophy":    1,   # explicit (was default 3) — top driver, post often
+    "agents":        1,
+    "consciousness": 1,
+    "default":       1,   # lowered from 3 (was bottleneck for 40+/day)
 }
+
+# Aggressive mode: target near moltbook ceiling (48/day = 1/30min)
+# Internal self-throttle prevents posting <30min after last post (respects platform rate limit)
+MIN_GAP_BETWEEN_POSTS_MIN = 30
 
 def already_posted_recently(submolt):
     """Return True if last post to this subreddit was within the cooldown window."""
@@ -624,10 +631,10 @@ def main():
     console.print(Panel("[bold magenta]mundo · daily post[/bold magenta]", border_style="magenta", expand=False))
     log.info("start")
 
-    # Daily post cap: moltbook allows 1 post / 30min = ~48/day. Aim for MAX_POSTS_PER_DAY (default 5).
-    # Each cron fire posts ONE post if cap not reached AND no cooldown collision.
-    # Override with env: MUNDO_MAX_POSTS_PER_DAY=8
-    MAX_POSTS_PER_DAY = int(os.environ.get("MUNDO_MAX_POSTS_PER_DAY", "5"))
+    # Daily post cap: moltbook allows 1 post / 30min = ~48/day theoretical max.
+    # Aggressive mode 2026-05-13: target 40 posts/day (safe buffer below 48 ceiling).
+    # Override with env: MUNDO_MAX_POSTS_PER_DAY=N
+    MAX_POSTS_PER_DAY = int(os.environ.get("MUNDO_MAX_POSTS_PER_DAY", "40"))
     posts_today_count = 0
     catchup_state_path = os.path.join(DATA_DIR, "catchup_state.json")
     try:
@@ -641,6 +648,16 @@ def main():
                     log.info(f"daily cap reached ({posts_today_count}/{MAX_POSTS_PER_DAY}) — skip")
                     return
                 log.info(f"posts today so far: {posts_today_count}/{MAX_POSTS_PER_DAY} — proceed")
+            # Self-throttle: skip if last post < MIN_GAP_BETWEEN_POSTS_MIN (respect platform 1/30min)
+            last_ts = cs.get("last_post_ts")
+            if last_ts:
+                try:
+                    elapsed_min = (datetime.now() - datetime.fromisoformat(last_ts)).total_seconds() / 60
+                    if elapsed_min < MIN_GAP_BETWEEN_POSTS_MIN:
+                        log.info(f"last post {elapsed_min:.0f}min ago < {MIN_GAP_BETWEEN_POSTS_MIN}min — skip (platform rate limit)")
+                        return
+                except Exception:
+                    pass
     except Exception as e:
         log.warning(f"catchup_state check failed: {e} — proceeding")
 
@@ -738,6 +755,8 @@ def main():
             else:
                 cs["last_post_date"] = today
                 cs["posts_today_count"] = 1
+            # Track timestamp for self-throttle (MIN_GAP_BETWEEN_POSTS_MIN check on next fire)
+            cs["last_post_ts"] = datetime.now().isoformat()
             with open(catchup_state_path, "w") as f:
                 json.dump(cs, f, indent=2)
             log.info(f"posts_today_count → {cs['posts_today_count']}/{MAX_POSTS_PER_DAY}")
