@@ -264,6 +264,57 @@ def check_sprint_tracker_monday_rotation():
         return True  # don't block other checks
 
 
+def check_daily_note_exists():
+    """Check that a bat-signal daily note exists for today on weekdays after 21:30 ICT.
+
+    Path convention (per reference_daily_pull_workflow.md):
+      ~/Documents/My Second Brain/06 - Daily/YYYY-MM/YYYY-MM-DD.md
+
+    Log-only check — bat-signal cannot self-fire without user intent. Catches the
+    "laptop off, missed evening" scenario surfaced 2026-05-15.
+    """
+    if NOW.weekday() >= 5:
+        log("· daily note: weekend, skip")
+        return True
+    if ICT_HOUR < 21 or (ICT_HOUR == 21 and NOW.minute < 30):
+        log("· daily note: window not yet (after 21:30)")
+        return True
+    note = HOME / "Documents/My Second Brain/06 - Daily" / TODAY.strftime("%Y-%m") / f"{TODAY}.md"
+    if note.exists():
+        size = note.stat().st_size
+        if size < 500:
+            log(f"⚠ daily note exists but tiny ({size}B) — skeleton not filled?")
+            return False
+        log(f"✓ daily note: {note.name} ({size}B)")
+        return True
+    log(f"⚠ daily note missing for {TODAY} — run bat signal manually")
+    log(f"  expected: {note}")
+    return False
+
+
+def check_excel_freshness():
+    """Check that ekyc_nfc_report_v20.xlsx has been refreshed within 24h on weekdays.
+
+    Bat-signal pulls Atlas → updates Excel; if Excel goes stale during work week,
+    Confluence updates will be reading stale data.
+
+    Log-only — does not auto-fire bat_signal (risky to modify Excel without user awareness).
+    """
+    if NOW.weekday() >= 5:
+        log("· excel freshness: weekend, skip")
+        return True
+    path = HOME / "Desktop/ekyc_nfc_report_v20.xlsx"
+    if not path.exists():
+        log(f"⚠ excel report missing: {path}")
+        return False
+    age_h = file_age_h(path)
+    if age_h > 24:
+        log(f"⚠ excel report stale ({age_h:.1f}h since last refresh) — run bat signal manually")
+        return False
+    log(f"✓ excel report fresh ({age_h:.1f}h)")
+    return True
+
+
 def check_excel_report_structure():
     """Check ekyc_nfc_report_v20.xlsx trend table has VNeID blended into FLOW NFC SR + FLOW % SHARE groups.
     Rule (2026-05-12): new flows blend into existing groups, no standalone trio column.
@@ -319,6 +370,8 @@ def main():
         "sprint_tracker_monday": check_sprint_tracker_monday_rotation(),
         "sprint_tracker_orphan": check_sprint_tracker_orphan_rows(),
         "excel_report_structure": check_excel_report_structure(),
+        "daily_note_exists":     check_daily_note_exists(),
+        "excel_freshness":       check_excel_freshness(),
     }
     failed = [k for k, v in results.items() if not v]
     log(f"=== done · ok={len(results)-len(failed)}/{len(results)} · failed={failed or 'none'} ===\n")
