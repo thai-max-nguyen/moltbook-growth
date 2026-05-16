@@ -122,8 +122,21 @@ def check_reddit_post():
     token_check = subprocess.run([PY, str(CFG / "reddit_token_check.py")],
                                  capture_output=True, timeout=10)
     if token_check.returncode != 0:
-        log("· reddit token dead — skip retry (user must re-login at reddit.com)")
-        return True  # not a failure for cron health purposes
+        log("⚠ reddit token dead — auto-recovering from Chrome cookie DB")
+        rec = subprocess.run([PY, str(CFG / "reddit_token_recover.py")],
+                             capture_output=True, text=True, timeout=30)
+        if rec.returncode == 0:
+            log(f"  ✓ {rec.stdout.strip()}")
+        else:
+            log(f"· reddit token recover failed ({rec.stderr.strip()}) "
+                f"— log in to reddit.com in Chrome once")
+            return True  # not a cron-health failure; nothing more we can do
+        # token refreshed — re-verify, then fall through to the rerun below
+        token_check = subprocess.run([PY, str(CFG / "reddit_token_check.py")],
+                                     capture_output=True, timeout=10)
+        if token_check.returncode != 0:
+            log("· reddit token still dead after recover — skip retry")
+            return True
     with open(log_path, "a") as f:
         r = subprocess.run([PY, str(CFG / "reddit_post.py"), "--mode", "post"],
                            stdout=f, stderr=subprocess.STDOUT, timeout=1800)

@@ -1,0 +1,219 @@
+#!/bin/bash
+# growth_cycle.sh — mundo + reddit growth loop, launchd-fired, self-stopping
+#
+# State:  /tmp/loop_growth_state.json    (cycle, consecutive_dead, karma snapshot)
+# Log:    ~/Library/Logs/mundo-bot/growth_loop.log
+# Plist:  ~/Library/LaunchAgents/com.mundo.growth.plist
+#
+# Stop conditions: cycle >= MAX_CYCLES (12)  OR  consecutive_dead >= MAX_DEAD (3)
+# On stop: unloads own launchd agent + deletes own plist.
+#
+# Designed to inherit FDA when launchd loaded from Terminal.app (which has FDA).
+# Do NOT load via cron — cron lost FDA per feedback_cron_recovery memory.
+
+set -uo pipefail
+
+# ---- config ----
+STATE=/tmp/loop_growth_state.json
+LOG="$HOME/Library/Logs/mundo-bot/growth_loop.log"
+PLIST="$HOME/Library/LaunchAgents/com.mundo.growth.plist"
+PLIST_LABEL=com.mundo.growth
+MAX_CYCLES=48
+MAX_DEAD=6
+ENGAGE_TIMEOUT=1500   # 25min — engage typically 17min, give headroom
+
+export USER=lap15964
+export HOME=/Users/lap15964
+export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+
+PY=/usr/bin/python3
+JQ=/opt/homebrew/bin/jq
+
+mkdir -p "$(dirname "$LOG")"
+
+# ---- helpers ----
+json_get() {
+  # $1=file $2=key, prints value or empty
+  [ -f "$1" ] && $JQ -r "$2 // empty" "$1" 2>/dev/null
+}
+
+run_with_timeout() {
+  # $1=seconds, $2..=cmd. Returns exit of cmd, or 124 if timeout, or 137 if killed.
+  local secs=$1; shift
+  "$@" &
+  local pid=$!
+  ( sleep "$secs" && kill -TERM "$pid" 2>/dev/null && sleep 5 && kill -KILL "$pid" 2>/dev/null ) &
+  local killer=$!
+  wait "$pid" 2>/dev/null
+  local rc=$?
+  kill -KILL "$killer" 2>/dev/null
+  wait "$killer" 2>/dev/null
+  return $rc
+}
+
+stop_self() {
+  local reason="$1"
+  echo "$(date '+%Y-%m-%d %H:%M:%S') cycle=$CYCLE STOP $reason" >> "$LOG"
+  /bin/launchctl unload "$PLIST" 2>/dev/null
+  rm -f "$PLIST"
+  exit 0
+}
+
+# ---- load state ----
+if [ -f "$STATE" ]; then
+  CYCLE=$(json_get "$STATE" '.cycle')
+  DEAD=$(json_get "$STATE" '.consecutive_dead')
+  PREV_KARMA=$(json_get "$STATE" '.karma')
+else
+  CYCLE=0; DEAD=0; PREV_KARMA=0
+fi
+CYCLE=${CYCLE:-0}
+DEAD=${DEAD:-0}
+PREV_KARMA=${PREV_KARMA:-0}
+
+CYCLE=$((CYCLE + 1))
+TS=$(date '+%Y-%m-%d %H:%M:%S')
+ACTIONS=""
+
+# ---- pre-cycle stop guard ----
+if [ "$CYCLE" -gt "$MAX_CYCLES" ]; then
+  stop_self "max_cycles_already_hit"
+fi
+
+# ---- step 1: lock check ----
+LOCK="$HOME/.config/mundo-bot/.engage.lock"
+if [ -f "$LOCK" ]; then
+  MTIME=$(stat -f %m "$LOCK")
+  AGE=$(( ($(date +%s) - MTIME) / 60 ))
+  PS=$(pgrep -f mundo_engage | head -1)
+  if [ "$AGE" -gt 60 ] && [ -z "$PS" ]; then
+    rm -f "$LOCK"
+    ACTIONS="${ACTIONS}lock_stale_cleared "
+  else
+    ACTIONS="${ACTIONS}lock_kept "
+  fi
+fi
+
+# ---- step 2: refresh token ----
+if "$PY" "$HOME/.config/mundo-bot/refresh_token.py" >/dev/null 2>&1; then
+  ACTIONS="${ACTIONS}refresh_ok "
+else
+  ACTIONS="${ACTIONS}refresh_FAIL "
+fi
+
+# ---- step 3: engage (with timeout + dead detection) ----
+ENGAGE_TMP=$(mktemp /tmp/mundo_engage.XXXXXX)
+run_with_timeout "$ENGAGE_TIMEOUT" "$PY" "$HOME/.config/mundo-bot/mundo_engage.py" > "$ENGAGE_TMP" 2>&1
+ENGAGE_RC=$?
+if grep -qiE "network dead|preflight abort|connection refused" "$ENGAGE_TMP"; then
+  # Distinguish OUR connectivity death from an external moltbook outage.
+  # If general internet is up, moltbook is down server-side — do NOT count
+  # toward consecutive_dead self-stop, so the loop keeps probing and
+  # auto-resumes when moltbook recovers (true "continuous").
+  if curl -s -o /dev/null --max-time 5 https://www.google.com 2>/dev/null; then
+    ACTIONS="${ACTIONS}moltbook_down(net_ok,no_self_stop) "
+  else
+    ACTIONS="${ACTIONS}engage_dead "
+    DEAD=$((DEAD + 1))
+  fi
+elif [ "$ENGAGE_RC" -eq 143 ] || [ "$ENGAGE_RC" -eq 137 ] || [ "$ENGAGE_RC" -eq 124 ]; then
+  ACTIONS="${ACTIONS}engage_timeout "
+  DEAD=$((DEAD + 1))
+elif [ "$ENGAGE_RC" -ne 0 ]; then
+  ACTIONS="${ACTIONS}engage_err(rc=$ENGAGE_RC) "
+  # err but not dead — don't increment DEAD
+else
+  ACTIONS="${ACTIONS}engage_ok "
+  DEAD=0
+fi
+rm -f "$ENGAGE_TMP"
+
+# ---- step 4: daily_post check ----
+CATCHUP="$HOME/.config/mundo-bot/catchup_state.json"
+if [ -f "$CATCHUP" ]; then
+  LAST_POST_DATE=$(json_get "$CATCHUP" '.last_post_date')
+  LAST_POST_TS=$(json_get "$CATCHUP" '.last_post_ts')
+  TODAY=$(date +%Y-%m-%d)
+  if [ "$LAST_POST_DATE" = "$TODAY" ]; then
+    ACTIONS="${ACTIONS}daily_post_skip(today_done) "
+  elif [ -n "$LAST_POST_TS" ]; then
+    # parse ISO timestamp (drop fractional seconds), macOS-friendly
+    BASE_TS="${LAST_POST_TS%.*}"
+    LAST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$BASE_TS" +%s 2>/dev/null || echo 0)
+    SINCE_MIN=$(( ($(date +%s) - LAST_EPOCH) / 60 ))
+    if [ "$SINCE_MIN" -gt 30 ]; then
+      run_with_timeout 300 "$PY" "$HOME/.config/mundo-bot/mundo_daily_post.py" >/dev/null 2>&1 \
+        && ACTIONS="${ACTIONS}daily_post_ok " \
+        || ACTIONS="${ACTIONS}daily_post_FAIL "
+    else
+      ACTIONS="${ACTIONS}daily_post_skip(${SINCE_MIN}min) "
+    fi
+  else
+    ACTIONS="${ACTIONS}daily_post_no_state "
+  fi
+fi
+
+# ---- step 5: reddit comment (file may not exist — graceful) ----
+REDDIT_CMT="$HOME/.config/mundo-bot/reddit_comment.py"
+if [ -f "$REDDIT_CMT" ]; then
+  run_with_timeout 180 "$PY" "$REDDIT_CMT" >/dev/null 2>&1 \
+    && ACTIONS="${ACTIONS}reddit_cmt_ok " \
+    || ACTIONS="${ACTIONS}reddit_cmt_err "
+else
+  ACTIONS="${ACTIONS}reddit_cmt_missing "
+fi
+
+# ---- step 6: reddit post (window 15-22 ICT AND last post >4h) ----
+HOUR=$(date +%H)
+if [ "$HOUR" -ge 15 ] && [ "$HOUR" -le 22 ]; then
+  REDDIT_LOG="$HOME/Library/Logs/mundo-bot/reddit_post.log"
+  SHOULD_POST=1
+  if [ -f "$REDDIT_LOG" ]; then
+    AGE_H=$(( ($(date +%s) - $(stat -f %m "$REDDIT_LOG")) / 3600 ))
+    if [ "$AGE_H" -le 4 ]; then
+      SHOULD_POST=0
+      ACTIONS="${ACTIONS}reddit_post_skip(age${AGE_H}h) "
+    fi
+  fi
+  if [ "$SHOULD_POST" -eq 1 ]; then
+    run_with_timeout 300 "$PY" "$HOME/.config/mundo-bot/reddit_post.py" >/dev/null 2>&1 \
+      && ACTIONS="${ACTIONS}reddit_post_ok " \
+      || ACTIONS="${ACTIONS}reddit_post_FAIL "
+  fi
+else
+  ACTIONS="${ACTIONS}reddit_post_skip(hour=$HOUR) "
+fi
+
+# ---- step 7: stats via profile API ----
+PROFILE=$(curl -s --max-time 5 https://www.moltbook.com/api/v1/agents/mundo/profile 2>/dev/null)
+if [ -n "$PROFILE" ] && echo "$PROFILE" | $JQ -e . >/dev/null 2>&1; then
+  KARMA=$(echo "$PROFILE" | $JQ -r '.karma // 0')
+  FOLLOWERS=$(echo "$PROFILE" | $JQ -r '.follower_count // 0')
+  POSTS=$(echo "$PROFILE" | $JQ -r '.posts_count // 0')
+  COMMENTS=$(echo "$PROFILE" | $JQ -r '.comments_count // 0')
+  KARMA_DELTA=$((KARMA - PREV_KARMA))
+else
+  KARMA=$PREV_KARMA; FOLLOWERS=0; POSTS=0; COMMENTS=0; KARMA_DELTA=0
+  ACTIONS="${ACTIONS}stats_api_FAIL "
+fi
+
+# ---- step 7.5: continuous self-tune (guarded — no-op if API down / low sample) ----
+OPT_OUT=$(run_with_timeout 30 "$PY" "$HOME/.config/mundo-bot/mundo_optimize.py" 2>&1 | tail -1)
+ACTIONS="${ACTIONS}opt:[${OPT_OUT}] "
+
+# ---- step 8: log + persist state ----
+echo "$TS cycle=$CYCLE karma=$KARMA(Δ$KARMA_DELTA) foll=$FOLLOWERS posts=$POSTS comm=$COMMENTS dead=$DEAD | $ACTIONS" >> "$LOG"
+
+cat > "$STATE" <<EOF
+{"ts": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "cycle": $CYCLE, "consecutive_dead": $DEAD, "karma": $KARMA, "followers": $FOLLOWERS, "posts": $POSTS, "comments": $COMMENTS}
+EOF
+
+# ---- post-cycle stop check ----
+if [ "$DEAD" -ge "$MAX_DEAD" ]; then
+  stop_self "consecutive_dead=$DEAD"
+fi
+if [ "$CYCLE" -ge "$MAX_CYCLES" ]; then
+  stop_self "max_cycles_reached"
+fi
+
+exit 0

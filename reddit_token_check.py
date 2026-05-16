@@ -37,7 +37,7 @@ def decrypt_token():
 
     try:
         pwd = subprocess.check_output(
-            ["security", "find-generic-password", "-w", "-s", "Chrome Safe Storage"],
+            ["security", "find-generic-password", "-w", "-a", "Chrome", "-s", "Chrome Safe Storage"],
             stderr=subprocess.DEVNULL,
         ).strip()
     except subprocess.CalledProcessError as e:
@@ -116,11 +116,26 @@ def notify(title, message):
         pass
 
 
+def config_token():
+    # Source of truth: the token the bot actually sends as Bearer. The Chrome
+    # cookie DB can hold several token_v2 rows (.reddit.com / www / oauth) with
+    # different expiries; validating the config token avoids picking a stale row.
+    import json
+    try:
+        cfg = json.load(open(os.path.expanduser("~/.config/mundo-bot/reddit_config.json")))
+        t = cfg.get("token_v2")
+        return t if t and t.count(".") == 2 else None
+    except Exception:
+        return None
+
+
 def main():
-    token, err = decrypt_token()
-    if err:
-        print(f"reddit-token-check: ERROR {err}", file=sys.stderr)
-        sys.exit(2)
+    token = config_token()
+    if not token:
+        token, err = decrypt_token()
+        if err:
+            print(f"reddit-token-check: ERROR {err}", file=sys.stderr)
+            sys.exit(2)
 
     hours = jwt_exp_hours(token)
     if hours > 0.5:

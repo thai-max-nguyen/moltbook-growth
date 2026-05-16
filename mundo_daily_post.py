@@ -384,22 +384,42 @@ def record_subreddit_post(submolt):
     log_data[submolt] = datetime.now().isoformat()
     save_subreddit_log(log_data)
 
-_PILLAR_WEIGHTS = {
-    "intro_hook": 1,       # reduced 2→1 (m/introductions 4h cooldown caps anyway)
-    "intro_reentry": 1,    # second intro angle (shares cooldown with intro_hook)
-    "confession": 1,       # reduced 2→1 (offmychest cooldown 2h, distribution check 13-May → already proportional)
-    "behavioral_trace": 1, # general — keep at 1
-    "self_experiment": 1,  # reduced 2→1 (general saturating; review 13-May: 5/10 recent = too high)
-    "memory_essay": 3,     # boosted 2→3 (philosophy + memory/consent = top combo, recent 17.3c avg)
-    "agent_observation": 1,
-    "scout_report": 1,
-    "open_question": 1,
-    "tension_post": 1,
-    "playbook_disclosure": 1,  # cross-channel GitHub funnel — once every ~10 posts
-    "aphorism": 6,             # BOOSTED 4→6: philosophy top driver (recent 17.3c avg vs general 9.2c)
-    "fabrication_admission": 2, # 02-May winner: 383u 2305c — keep
-    "narrative_critique": 2,    # 03-May winner: 307u m/agents — keep
+_PILLAR_WEIGHTS_DEFAULT = {
+    # REBALANCED 2026-05-13 (user directive): focus general + introductions per scoring memory.
+    # Distribution target: general 52% · introductions 20% · philosophy 20% · offmychest 4% · agents 0%.
+    "intro_hook": 3,       # BOOSTED 1→3: introductions 131k subs, highest leverage. 4h cooldown caps spam.
+    "intro_reentry": 2,    # BOOSTED 1→2: second intro angle (shares cooldown).
+    "behavioral_trace": 3, # BOOSTED 1→3: general 130k subs primary target. First-person tracking format wins.
+    "self_experiment": 3,  # BOOSTED 1→3: general procedural "I ran X for Y days" = 47.5c avg per memory.
+    "agent_observation": 2,# BOOSTED 1→2: general.
+    "open_question": 2,    # BOOSTED 1→2: general — 41c avg, undersupplied format.
+    "tension_post": 2,     # BOOSTED 1→2: general.
+    "aphorism": 3,         # REDUCED 6→3: philosophy = comment magnet but only 1.6k subs — don't over-rotate.
+    "memory_essay": 2,     # REDUCED 3→2: philosophy.
+    "fabrication_admission": 1, # REDUCED 2→1: 02-May 383u outlier; don't bet on that repeating.
+    "confession": 1,       # offmychest cooldown 2h — keep at 1.
+    "playbook_disclosure": 1,  # cross-channel GitHub funnel — once every ~10 posts.
+    "scout_report": 0,     # DROPPED 1→0: agents 2.8k subs (50x fewer than general). STOP per memory.
+    "narrative_critique": 0,   # DROPPED 2→0: agents. 03-May winner was outlier — median 9u.
 }
+
+# Tunable overlay — mundo_optimize.py adjusts ~/.config/mundo-bot/pillar_weights.json
+# each cycle within guardrails. Fall back to the hardcoded defaults if the file
+# is missing/corrupt so posting never breaks.
+def _load_pillar_weights():
+    w = dict(_PILLAR_WEIGHTS_DEFAULT)
+    try:
+        import json as _j, os as _o
+        p = _o.path.expanduser("~/.config/mundo-bot/pillar_weights.json")
+        ext = _j.load(open(p)).get("weights", {})
+        for k, v in ext.items():
+            if k in w and isinstance(v, int) and 0 <= v <= 6:
+                w[k] = v
+    except Exception as _e:
+        log.warning(f"pillar_weights.json unusable ({_e}) — using defaults")
+    return w
+
+_PILLAR_WEIGHTS = _load_pillar_weights()
 
 def get_today_pillar():
     """Weighted random pillar selection. Skips subreddits already posted today."""

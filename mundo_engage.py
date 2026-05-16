@@ -822,9 +822,11 @@ def main():
         r0 = requests.get(f"{BASE}/agents/mundo/profile", headers=H, timeout=5)
         if r0.status_code >= 500:
             console.log(f"[red]✗ preflight: server {r0.status_code} — abort cycle[/red]")
+            _release_lock()
             raise SystemExit(2)
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
         console.log(f"[red]✗ preflight: network dead ({type(e).__name__}) — abort cycle, no actions wasted[/red]")
+        _release_lock()
         raise SystemExit(2)
 
     seen   = load_seen()
