@@ -280,13 +280,23 @@ def main():
             client = connect()
         log("connected", "ok")
         data = pull_data(client)
-        with console.status("[cyan]Updating plan baseline…[/cyan]"):
-            baseline = format_baseline_section(data)
-            update_plan_baseline(baseline)
-        with console.status("[cyan]Appending to health profile…[/cyan]"):
-            append_to_health_profile(data)
+        # Vault mirror writes are SECONDARY — a macOS TCC PermissionError
+        # (cron python lacks Full Disk Access to ~/Documents) must NOT abort
+        # the run after Garmin data is already pulled. Degrade, don't FATAL.
+        for label, fn in (
+            ("plan baseline", lambda: update_plan_baseline(format_baseline_section(data))),
+            ("health profile", lambda: append_to_health_profile(data)),
+        ):
+            try:
+                with console.status(f"[cyan]Updating {label}…[/cyan]"):
+                    fn()
+            except (PermissionError, OSError) as ve:
+                log(f"VAULT WRITE BLOCKED ({label}): {ve} — likely macOS TCC: "
+                    f"grant Full Disk Access to /usr/bin/python3 (or cron), "
+                    f"or rerun interactively. Garmin data pulled OK; continuing.",
+                    "error")
         print_summary(data)
-        log("=== done ===", "ok")
+        log("=== done (garmin pull ok) ===", "ok")
     except Exception as e:
         log(f"FATAL: {e}", "error")
         raise

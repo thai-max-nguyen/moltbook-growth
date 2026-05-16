@@ -507,9 +507,21 @@ def main():
         if os.path.exists(check_path):
             r = subprocess.run([sys.executable, check_path], capture_output=True, text=True, timeout=10)
             if r.returncode != 0:
-                log.error(f"reddit token preflight failed (rc={r.returncode}) — abort cycle, no API calls wasted")
-                log.error(r.stderr.strip() or r.stdout.strip())
-                sys.exit(2)
+                log.warning(f"reddit token preflight failed (rc={r.returncode}) — attempting auto-recover")
+                log.warning(r.stderr.strip() or r.stdout.strip())
+                recover_path = os.path.join(DATA_DIR, "reddit_token_recover.py")
+                recovered = False
+                if os.path.exists(recover_path):
+                    rr = subprocess.run([sys.executable, recover_path], capture_output=True, text=True, timeout=60)
+                    if rr.returncode == 0:
+                        r2 = subprocess.run([sys.executable, check_path], capture_output=True, text=True, timeout=10)
+                        recovered = r2.returncode == 0
+                        log.info(f"auto-recover {'succeeded' if recovered else 'ran but token still invalid'}: {rr.stdout.strip()}")
+                    else:
+                        log.error(f"auto-recover failed: {rr.stderr.strip() or rr.stdout.strip()}")
+                if not recovered:
+                    log.error("reddit token unrecoverable — abort cycle, no API calls wasted")
+                    sys.exit(2)
     except subprocess.TimeoutExpired:
         log.error("reddit token preflight timeout — abort")
         sys.exit(2)
