@@ -30,7 +30,9 @@ LEARN_F = os.path.join(CFG_DIR, "mundo_learnings.md")
 CRED_F = os.path.expanduser("~/.config/moltbook/credentials.json")
 
 ALPHA = 0.3
-MIN_SAMPLE = 3          # min posts for a submolt before it can move weights
+MIN_SAMPLE = 2          # min posts for a submolt before it can move weights
+                        # (2026-05-20: 3 starved the loop — windows tiny, only
+                        # ~1 post/day via loop; EWMA alpha=0.3 still smooths)
 FLOOR, CEIL = 1, 6
 FROZEN_ZERO = {"scout_report", "narrative_critique"}  # m/agents — stay 0
 
@@ -139,8 +141,11 @@ def main():
                 w[p] = w.get(p, 1) + 1
                 changes.append(f"+1 {p}->{w[p]} (m/{best} ewma "
                                f"{elig[best]:.1f}>mean {mean:.1f})")
-        # demote one pillar in the worst submolt (if clearly below mean)
-        if elig[worst] < mean * 0.5 and worst != best:
+        # demote one pillar in the worst submolt (if below mean)
+        # 2026-05-20: was mean*0.5 — asymmetric vs promote(>mean) ratchet,
+        # weights only climbed & pinned at ceiling on stale signal.
+        # mean*0.85 lets overshoot correct; ±1/run bound still prevents thrash.
+        if elig[worst] < mean * 0.85 and worst != best:
             cand = sorted(
                 (p for p, s in PILLAR_SUBMOLT.items()
                  if s == worst and p not in FROZEN_ZERO

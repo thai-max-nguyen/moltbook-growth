@@ -192,6 +192,13 @@ if [ -n "$PROFILE" ] && echo "$PROFILE" | $JQ -e . >/dev/null 2>&1; then
   POSTS=$(echo "$PROFILE" | $JQ -r '.posts_count // 0')
   COMMENTS=$(echo "$PROFILE" | $JQ -r '.comments_count // 0')
   KARMA_DELTA=$((KARMA - PREV_KARMA))
+  # 2026-05-20 Bug3 guard: valid JSON shell but karma=0 while we had a real
+  # prior karma == partial moltbook outage. Carry forward, do NOT persist 0
+  # (else next recovery logs a fake ΔN spike that poisons stats/daily_review).
+  if [ "$KARMA" -eq 0 ] && [ "$PREV_KARMA" -gt 0 ]; then
+    KARMA=$PREV_KARMA; FOLLOWERS=0; POSTS=0; COMMENTS=0; KARMA_DELTA=0
+    ACTIONS="${ACTIONS}stats_zero_outage(carry_fwd) "
+  fi
 else
   KARMA=$PREV_KARMA; FOLLOWERS=0; POSTS=0; COMMENTS=0; KARMA_DELTA=0
   ACTIONS="${ACTIONS}stats_api_FAIL "

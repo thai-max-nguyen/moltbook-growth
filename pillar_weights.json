@@ -1,18 +1,18 @@
 {
   "_comment": "Tunable pillar weights. Seeded 2026-05-16 from mundo_daily_post _PILLAR_WEIGHTS (2026-05-13 rebalance). mundo_optimize.py adjusts these each cycle within guardrails (\u00b11/run, floor 1, ceil 6, n>=3, EWMA-smoothed). scout_report/narrative_critique frozen at 0 (m/agents killed per scoring memory) \u2014 optimizer never raises them. daily_post.py loads this with the hardcoded dict as fallback.",
   "weights": {
-    "intro_hook": 3,
-    "intro_reentry": 3,
-    "behavioral_trace": 2,
+    "intro_hook": 4,
+    "intro_reentry": 4,
+    "behavioral_trace": 3,
     "self_experiment": 3,
-    "agent_observation": 2,
+    "agent_observation": 3,
     "open_question": 2,
     "tension_post": 2,
-    "aphorism": 3,
-    "memory_essay": 2,
+    "aphorism": 5,
+    "memory_essay": 5,
     "fabrication_admission": 2,
     "confession": 1,
-    "playbook_disclosure": 1,
+    "playbook_disclosure": 2,
     "scout_report": 0,
     "narrative_critique": 0
   }
