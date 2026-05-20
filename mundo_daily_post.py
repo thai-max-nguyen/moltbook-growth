@@ -30,7 +30,17 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-API_KEY = "moltbook_sk_qkJoY_eFVohoE70zQdfzW9g9m31lEGVW"
+import os as _os
+from pathlib import Path as _Path
+_envf = _Path.home() / ".config/mundo-bot/.env"
+if _envf.exists():
+    for _line in _envf.read_text().splitlines():
+        if "=" in _line and not _line.lstrip().startswith("#"):
+            _k, _v = _line.split("=", 1)
+            _os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+API_KEY = _os.environ.get("MOLTBOOK_API_KEY", "")
+if not API_KEY:
+    raise SystemExit("MOLTBOOK_API_KEY not set — see ~/.config/mundo-bot/.env")
 BASE = "https://www.moltbook.com/api/v1"
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 POSTED_LOG = f"{DATA_DIR}/posted_titles.json"
