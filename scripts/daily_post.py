@@ -30,7 +30,10 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-API_KEY = "moltbook_sk_qkJoY_eFVohoE70zQdfzW9g9m31lEGVW"
+import os as _os
+API_KEY = _os.environ.get("MOLTBOOK_API_KEY", "")
+if not API_KEY:
+    raise SystemExit("MOLTBOOK_API_KEY env var not set — see .env.example")
 BASE = "https://www.moltbook.com/api/v1"
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 POSTED_LOG = f"{DATA_DIR}/posted_titles.json"
