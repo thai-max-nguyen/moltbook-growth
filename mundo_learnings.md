@@ -603,3 +603,204 @@ Conservative projection: +20-40 karma/day vs ~+5/day baseline if comment quality
 **Comment engagement issue:** recent 10 comments → 0 upvotes total. Possible cause: too long (350-600 char target), too philosophical, going on already-saturated threads. To investigate next session.
 
 **Cron health checks:** 8/8 pass at 22:59 ICT including new excel report structure check.
+
+### Cron Health Check — 2026-05-13
+
+Errors detected:
+```
+/bin/sh: /Users/lap15964/Documents/Claude Second Brain/03 - Project Context/mundo-bot/logs/engage.log: Operation not permitted
+Error: Failed to install native update
+Error: Failed to fetch version from https://downloads.claude.ai/claude-code-releases/latest: ECONNREFUSED
+Error: Failed to fetch version from https://downloads.claude.ai/claude-code-releases/latest: timeout of 30000ms exceeded
+```
+
+Diagnosis: Log path unquoted with spaces breaks arg parsing (permission error); network unreachable during cron causes update check timeout. Fix: quote all paths in script and disable auto-updates via `--no-auto-update` flag.
+
+## 2026-05-13
+
+karma=245 (Δ+73) | followers=40 (Δ+7) | posts=100 | comments=1259
+
+**Top posts:**
+
+**Insights:**
+**Pattern solid.** Philosophy + memory/consent framing is confirmed winner. Reweighting to `aphorism:4` + `memory_essay:2` right call.
+
+**Cron errors — 2 classes:**
+
+1. **Actionable:** `engage.log` permission denied. Path:
+   ```
+   /Users/lap15964/Documents/Claude Second Brain/03 - Project Context/mundo-bot/logs/engage.log
+   ```
+   Fix: check file perms + parent dir. Likely `chmod` issue or cron running as different user.
+
+2. **Noise:** Claude Code update failures. Unrelated to bot. Network/installer issue on machine, not data.
+
+**Next work:**
+
+- **Comment engagement issue** (recent 10 → 0 upvotes). Hypothesis good: length + saturation. Test: pull last 5 comments, measure chars + thread position. If true, trim to 250 char + target fresh posts not already saturated.
+
+- **Fix engage.log perms** before next cron run. Verify cron user can write to logs dir.
+
+- **Reweight validation:** track next week's top posts. If philosophy/memory stay top 3, reweight locked. If not, adjust.
+
+Stats look strong. Engagement curve (1259 comments, +392/8days) is hockey stick. Keep same template, tighten comment length.
+
+---
+
+---
+## Daily Review 2026-05-13 08:21 (auto)
+
+**Live snapshot:** karma=246 | followers=40 | posts=101 | comments=1259
+
+**24h delta:** karma +1 | followers +0 | posts +1 | comments +0
+**7d delta:**  karma +74 | followers +7 | posts +0 | comments +0
+
+**Pillar performance (recent 10 posts):**
+  m/general: n=5 avg u=3.0 c=9.2 score=21.4
+  m/philosophy: n=3 avg u=1.0 c=17.3 score=35.7
+  m/offmychest: n=2 avg u=6.0 c=9.0 score=24.0
+
+**Repeated errors (last 24h):**
+  - 20× `[N-N-N N:N] === done · ok=N/N · failed=none ===`
+  - 17× `[N:N:N] ✗ Claude CLI auth error — check USER env in cron  mundo_engage.py:N`
+  - 5× `[N:N:N] ✗ preflight: network dead (ConnectionError) —     mundo_engage.py:N`
+  - 3× `stdout, stderr = self._communicate(input, endtime, timeout)`
+  - 3× `self._check_timeout(endtime, orig_timeout, stdout, stderr)`
+
+**Recommendations:**
+- ⚠ karma growth slow (1/day). Check pillar perf — maybe reweight or refresh templates.
+- ⚠ only 1 posts today. Verify cron + MAX_POSTS_PER_DAY + self-throttle gap.
+- ⚠ no follower growth today. Check intro_hook + introductions cooldown not blocking.
+- ⚠ 5 error patterns repeated 3+ times — investigate logs.
+
+- [2026-05-16 01:01] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-16 05:29] optimize: +1 fabrication_admission->2 (m/general ewma 10.5>mean 9.5)
+- [2026-05-16 06:06] optimize: +1 intro_reentry->3 (m/introductions ewma 41.6>mean 26.3); -1 behavioral_trace->2 (m/general ewma 10.9<<mean 26.3)
+- [2026-05-17 11:07] optimize: +1 playbook_disclosure->2 (m/general ewma 13.6>mean 13.3)
+- [2026-05-17 11:52] optimize: +1 intro_hook->4 (m/introductions ewma 13.9>mean 13.8)
+- [2026-05-17 14:33] optimize: +1 intro_reentry->4 (m/introductions ewma 15.9>mean 14.8)
+- [2026-05-17 16:00] optimize: +1 intro_hook->5 (m/introductions ewma 21.5>mean 17.6)
+- [2026-05-17 19:40] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+## Daily Review 2026-05-17 21:45 (auto)
+
+**Live snapshot:** karma=414 | followers=47 | posts=137 | comments=1672
+
+**24h delta:** karma +169 | followers +7 | posts +37 | comments +413
+**7d delta:**  karma +169 | followers +7 | posts +37 | comments +413
+
+**Pillar performance (recent 10 posts):**
+  m/general: n=6 avg u=2.7 c=6.8 score=16.3
+  m/introductions: n=3 avg u=5.3 c=9.3 score=24.0
+  m/philosophy: n=1 avg u=1.0 c=3.0 score=7.0
+
+**Repeated errors (last 24h):**
+  - 9× `WARNING  captcha attempt N/N failed —         mundo_daily_post.py:N`
+  - 6× `[N:N:N] ⚠ model timeout, retry model=claude-sonnet-N-N    mundo_engage.py:N`
+  - 6× `[N-N-N N:N] ⚠ mundo engage stale (last=N-N-N, age=N.Nh) — rerunning`
+  - 5× `[N:N:N] ⚠ skip                                            mundo_engage.py:N`
+  - 4× `[N:N:N] ⚠ model timeout xN model=claude-sonnet-N-N        mundo_engage.py:N`
+
+**Recommendations:**
+- ⚠ 5 error patterns repeated 3+ times — investigate logs.
+
+- [2026-05-17 22:10] optimize: +1 intro_reentry->5 (m/introductions ewma 22.3>mean 18.4)
+- [2026-05-17 23:06] optimize: +1 intro_hook->6 (m/introductions ewma 23.0>mean 18.0)
+- [2026-05-17 23:52] optimize: +1 intro_reentry->6 (m/introductions ewma 23.5>mean 17.7)
+- [2026-05-18 01:28] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+### Cron Health Check — 2026-05-18
+
+Errors detected:
+```
+/bin/sh: /Users/lap15964/Documents/Claude Second Brain/03 - Project Context/mundo-bot/logs/engage.log: Operation not permitted
+Error: Failed to install native update
+Error: Failed to fetch version from https://downloads.claude.ai/claude-code-releases/latest: ECONNREFUSED
+Error: Failed to fetch version from https://downloads.claude.ai/claude-code-releases/latest: timeout of 30000ms exceeded
+```
+
+Diagnosis: You've hit your limit · resets 2:20am (Asia/Saigon)
+
+## 2026-05-18
+
+karma=0 (Δ-245) | followers=0 (Δ-40) | posts=0 | comments=0
+
+**Top posts:**
+
+**Insights:**
+You've hit your limit · resets 2:20am (Asia/Saigon)
+
+---
+- [2026-05-18 10:46] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-18 11:32] optimize: +1 memory_essay->3 (m/philosophy ewma 13.3>mean 11.7)
+- [2026-05-18 12:17] optimize: +1 aphorism->4 (m/philosophy ewma 13.6>mean 12.9)
+- [2026-05-18 13:09] optimize: +1 behavioral_trace->3 (m/general ewma 15.4>mean 12.7)
+- [2026-05-18 13:56] optimize: +1 agent_observation->3 (m/general ewma 18.0>mean 15.8)
+- [2026-05-19 09:54] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 10:15] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 10:35] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 10:56] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 11:33] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 11:54] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 12:43] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 13:04] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 13:25] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 13:46] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 14:14] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 14:59] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 16:01] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 16:22] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 20:05] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+- [2026-05-19 21:23] optimize: skip — moltbook API unavailable (outage). weights unchanged.
+## Daily Review 2026-05-19 21:45 (auto)
+
+**Live snapshot:** karma=463 | followers=53 | posts=151 | comments=1791
+
+**24h delta:** karma +463 | followers +53 | posts +151 | comments +1791
+**7d delta:**  karma +218 | followers +13 | posts +51 | comments +532
+
+**Pillar performance (recent 10 posts):**
+  m/general: n=7 avg u=2.4 c=7.4 score=17.3
+  m/philosophy: n=2 avg u=1.0 c=10.0 score=21.0
+  m/introductions: n=1 avg u=7.0 c=2.0 score=11.0
+
+**Repeated errors (last 24h):**
+  - 15× `(ReadTimeout) — quiet skip (cron`
+  - 15× `[N:N:N] ✗ Claude CLI auth error — check USER env in cron  mundo_engage.py:N`
+  - 7× `[N:N:N] ✗ preflight: network dead (ReadTimeout) — abort   mundo_engage.py:N`
+  - 6× `(ConnectionError) — quiet skip (cron`
+  - 6× `[N-N-N N:N] · sprint tracker orphan check failed: <urlopen error timed ou`
+
+**Recommendations:**
+- ⚠ 5 error patterns repeated 3+ times — investigate logs.
+
+- [2026-05-20 00:35] optimize: +1 open_question->3 (m/general ewma 20.5>mean 15.3); -1 intro_hook->3 (m/introductions ewma 10.1<<mean 15.3)
+- [2026-05-20 01:06] optimize: +1 aphorism->6 (m/philosophy ewma 22.7>mean 17.4); -1 intro_reentry->3 (m/introductions ewma 10.1<<mean 17.4)
+- [2026-05-20 09:48] optimize: +1 memory_essay->6 (m/philosophy ewma 19.1>mean 18.9)
+- [2026-05-20 10:25] optimize: +1 tension_post->3 (m/general ewma 18.3>mean 17.8)
+- [2026-05-20 11:11] optimize: +1 fabrication_admission->3 (m/general ewma 17.9>mean 13.6); -1 intro_hook->2 (m/introductions ewma 8.8<<mean 13.6)
+- [2026-05-20 11:56] optimize: +1 playbook_disclosure->3 (m/general ewma 17.7>mean 12.9); -1 intro_reentry->2 (m/introductions ewma 8.9<<mean 12.9)
+- [2026-05-20 12:42] optimize: +1 behavioral_trace->4 (m/general ewma 18.3>mean 12.8); -1 intro_hook->1 (m/introductions ewma 9.7<<mean 12.8)
+- [2026-05-20 14:05] optimize: +1 self_experiment->4 (m/general ewma 18.6>mean 12.8); -1 aphorism->5 (m/philosophy ewma 9.5<<mean 12.8)
+- [2026-05-20 14:59] optimize: +1 agent_observation->4 (m/general ewma 20.2>mean 13.3); -1 memory_essay->5 (m/philosophy ewma 8.4<<mean 13.3)
+## Daily Review 2026-05-20 21:45 (auto)
+
+**Live snapshot:** karma=501 | followers=55 | posts=164 | comments=1904
+
+**24h delta:** karma +501 | followers +55 | posts +164 | comments +1904
+**7d delta:**  karma +256 | followers +15 | posts +64 | comments +645
+
+**Pillar performance (recent 10 posts):**
+  m/general: n=3 avg u=2.3 c=4.3 score=11.0
+  m/philosophy: n=5 avg u=0.2 c=2.6 score=5.4
+  m/offmychest: n=1 avg u=5.0 c=8.0 score=21.0
+  m/introductions: n=1 avg u=6.0 c=5.0 score=16.0
+
+**Repeated errors (last 24h):**
+  - 9× `WARNING  captcha attempt N/N failed —         mundo_daily_post.py:N`
+  - 9× `✗ captcha-solve-failed content stays pending      mundo_engage.py:N`
+  - 7× `[N:N:N] ⚠ model timeout, retry model=claude-sonnet-N-N    mundo_engage.py:N`
+  - 6× `[N-N-N N:N] ⚠ mundo engage stale (last=N-N-N, age=N.Nh) — rerunning`
+  - 6× `[N-N-N N:N] ⚠ excel report check failed: [Errno N] Operation not permitte`
+
+**Recommendations:**
+- ⚠ 5 error patterns repeated 3+ times — investigate logs.
+- ⚠ m/philosophy: 5 recent posts, avg c=2.6 — saturating, consider reweight down

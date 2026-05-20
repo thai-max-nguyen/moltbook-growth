@@ -1,0 +1,21 @@
+{
+  "last_review_ts": "2026-05-20T21:45:00.747317",
+  "live_at_review": {
+    "karma": 501,
+    "followers": 55,
+    "posts": 164,
+    "comments": 1904
+  },
+  "d1_karma": 501,
+  "d7_karma": 256,
+  "flagged_errors": [
+    "WARNING  captcha attempt N/N failed \u2014         mundo_daily_post.py:N",
+    "\u2717 captcha-solve-failed content stays pending      mundo_engage.py:N",
+    "[N:N:N] \u26a0 model timeout, retry model=claude-sonnet-N-N    mundo_engage.py:N",
+    "[N-N-N N:N] \u26a0 mundo engage stale (last=N-N-N, age=N.Nh) \u2014 rerunning",
+    "[N-N-N N:N] \u26a0 excel report check failed: [Errno N] Operation not permitte"
+  ],
+  "saturating_submolts": [
+    "philosophy"
+  ]
+}
