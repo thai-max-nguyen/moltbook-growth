@@ -61,7 +61,7 @@ def update_vault_flag(message):
 def notify(title, message):
     try:
         subprocess.run(
-            ["osascript", "-e", f'display notification "{message}" with title "{title}"'],
+            # ["osascript", "-e", f'display notification "{message}" with title "{title}"'],  # banner disabled 2026-05-20
             check=False,
             timeout=5,
         )
