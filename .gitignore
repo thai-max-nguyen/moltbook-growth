@@ -34,3 +34,7 @@ credentials.json
 .engage.lock
 recovery_state.json
 staged_post_tomorrow.json
+
+# Backup files
+*.bak
+*.original.md
