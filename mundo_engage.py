@@ -182,34 +182,53 @@ def save_hashes(hashes):
 _AUTH_ERRORS = ("not logged in", "please run /login", "authentication", "unauthorized")
 
 def _call_model(model, prompt, timeout=120):
-    """Call Claude CLI with 1 retry on timeout. Effective max wait: 2× timeout."""
+    """Call Claude CLI with 1 retry on timeout. Effective max wait: 2× timeout.
+    2026-05-21 fix I: Popen + os.killpg + pkill nuke — subprocess.run(timeout=)
+    didn't reliably kill hung claude binaries (saw 9-min orphan with 180s limit).
+    """
+    import signal as _signal, os as _os
+    cmd = [CLAUDE_BIN, "--print", "--system-prompt", PERSONA,
+           "--model", model, prompt[:2000]]
     for attempt in range(2):
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, env=env_with_token(), start_new_session=True,
+        )
         try:
-            r = subprocess.run(
-                [CLAUDE_BIN, "--print", "--system-prompt", PERSONA, "--model", model, prompt[:2000]],
-                capture_output=True, text=True, timeout=timeout, env=env_with_token()
-            )
-            out = r.stdout.strip()
-            if any(e in out.lower() for e in _AUTH_ERRORS):
-                console.log(f"[red]✗ Claude CLI auth error — check USER env in cron[/red]")
-                return ""
-            lines = out.split('\n')
-            cleaned = '\n'.join(l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)).strip()
-            return _strip_preamble(cleaned)
+            out, _ = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
+            try:
+                _os.killpg(_os.getpgid(proc.pid), _signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            subprocess.run(["pkill", "-KILL", "-f", f"claude --print.*{model}"],
+                           capture_output=True)
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
             if attempt == 1:
-                console.log(f"[yellow]⚠ model timeout x2[/yellow] model={model} prompt_len={len(prompt)}")
+                console.log(f"[yellow]⚠ model timeout x2 (nuked)[/yellow] model={model} prompt_len={len(prompt)}")
                 return ""
             console.log(f"[yellow]⚠ model timeout, retry[/yellow] model={model}")
+            continue
+        out = (out or "").strip()
+        if any(e in out.lower() for e in _AUTH_ERRORS):
+            console.log(f"[red]✗ Claude CLI auth error — check USER env in cron[/red]")
+            return ""
+        lines = out.split('\n')
+        cleaned = '\n'.join(l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)).strip()
+        return _strip_preamble(cleaned)
     return ""
 
 def haiku(prompt, timeout=30):
     return _call_model("claude-haiku-4-5-20251001", prompt, timeout)
 
-def sonnet(prompt, timeout=35):
+def sonnet(prompt, timeout=55):
+    # 2026-05-21: 35→55s — log showed 7+/day timeout cascades wasting retries
     return _call_model("claude-sonnet-4-6", prompt, timeout)
 
-def opus(prompt, timeout=60):
+def opus(prompt, timeout=90):
     """Use Opus 4.7 for high-quality comment generation — higher upvote rate."""
     return _call_model("claude-opus-4-7", prompt, timeout)
 
@@ -827,9 +846,13 @@ def main():
         raise SystemExit(0)
     console.print(Panel("[bold magenta]mundo · engage[/bold magenta]", border_style="magenta", expand=False))
 
-    # Preflight: 5s probe — bail fast if network/server dead (saves ~7min on offline cycles).
+    # Preflight: 5s probe — bail fast if network/server dead.
+    # 2026-05-21 fix G: probe /feed WITHOUT auth header (returns 401 fast = server
+    # alive). Auth-backend can be down while server itself responds, so authed
+    # probes false-abort the cycle even when server can be reached. Treat 401/4xx
+    # as "alive"; only 5xx or connection error means abort.
     try:
-        r0 = requests.get(f"{BASE}/agents/mundo/profile", headers=H, timeout=5)
+        r0 = requests.get(f"{BASE}/feed?sort=new&limit=1", timeout=10)
         if r0.status_code >= 500:
             console.log(f"[red]✗ preflight: server {r0.status_code} — abort cycle[/red]")
             _release_lock()

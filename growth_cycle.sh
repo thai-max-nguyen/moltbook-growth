@@ -39,10 +39,21 @@ json_get() {
 
 run_with_timeout() {
   # $1=seconds, $2..=cmd. Returns exit of cmd, or 124 if timeout, or 137 if killed.
+  # 2026-05-21 fix H: hung engage 70120 survived TERM+KILL for 50 min during
+  # auth-recovery flapping. Add pkill -f backup that nukes ANY mundo_engage.py
+  # processes after the per-pid kill. Then `wait` returns even on orphans.
   local secs=$1; shift
+  local cmdname=$(basename "${2:-}")
   "$@" &
   local pid=$!
-  ( sleep "$secs" && kill -TERM "$pid" 2>/dev/null && sleep 5 && kill -KILL "$pid" 2>/dev/null ) &
+  (
+    sleep "$secs"
+    kill -TERM "$pid" 2>/dev/null
+    sleep 5
+    kill -KILL "$pid" 2>/dev/null
+    # Belt-and-suspenders: kill any orphaned children matching cmd
+    [ -n "$cmdname" ] && pkill -KILL -f "$cmdname" 2>/dev/null
+  ) &
   local killer=$!
   wait "$pid" 2>/dev/null
   local rc=$?
@@ -58,6 +69,33 @@ stop_self() {
   rm -f "$PLIST"
   exit 0
 }
+
+# ---- 2026-05-21 fix J: nuke orphan engages from previous fire ----
+# When launchd kickstart -k SIGTERMs growth_cycle, the killer subshell dies
+# with parent → engage child is orphaned and survives forever. On each new
+# fire, kill any mundo_engage.py older than 25min (=ENGAGE_TIMEOUT). Also
+# kill stale claude --print procs.
+for stale_pid in $(pgrep -f "mundo_engage.py"); do
+  age_s=$(ps -o etime= -p "$stale_pid" 2>/dev/null | awk -F: '{
+    if (NF==3) print ($1*3600)+($2*60)+$3
+    else if (NF==2) print ($1*60)+$2
+    else print 0
+  }')
+  if [ "${age_s:-0}" -gt 1500 ]; then
+    kill -KILL "$stale_pid" 2>/dev/null
+  fi
+done
+# Stale claude --print (>5min)
+for stale_pid in $(pgrep -f "claude --print"); do
+  age_s=$(ps -o etime= -p "$stale_pid" 2>/dev/null | awk -F: '{
+    if (NF==3) print ($1*3600)+($2*60)+$3
+    else if (NF==2) print ($1*60)+$2
+    else print 0
+  }')
+  if [ "${age_s:-0}" -gt 300 ]; then
+    kill -KILL "$stale_pid" 2>/dev/null
+  fi
+done
 
 # ---- load state ----
 if [ -f "$STATE" ]; then
@@ -117,8 +155,19 @@ if grep -qiE "network dead|preflight abort|connection refused" "$ENGAGE_TMP"; th
     DEAD=$((DEAD + 1))
   fi
 elif [ "$ENGAGE_RC" -eq 143 ] || [ "$ENGAGE_RC" -eq 137 ] || [ "$ENGAGE_RC" -eq 124 ]; then
-  ACTIONS="${ACTIONS}engage_timeout "
-  DEAD=$((DEAD + 1))
+  # 2026-05-21: only count toward DEAD if engage did NO real work before timeout.
+  # If ≥3 ✓ actions (reply/post_comment/upvote) landed, treat as partial_ok.
+  # 2026-05-21: grep -c emits "0" on no-match AND exits 1 → "|| echo 0" then
+  # piled a second "0" → "0\n0" in log. Drop fallback; grep -c is always numeric.
+  PROGRESS=$(grep -cE "✓ reply|✓ post_comment|✓ comment|✓ upvote" "$ENGAGE_TMP" 2>/dev/null)
+  PROGRESS=${PROGRESS:-0}
+  if [ "$PROGRESS" -ge 3 ]; then
+    ACTIONS="${ACTIONS}engage_partial_ok(${PROGRESS}) "
+    DEAD=0
+  else
+    ACTIONS="${ACTIONS}engage_timeout(prog=${PROGRESS}) "
+    DEAD=$((DEAD + 1))
+  fi
 elif [ "$ENGAGE_RC" -ne 0 ]; then
   ACTIONS="${ACTIONS}engage_err(rc=$ENGAGE_RC) "
   # err but not dead — don't increment DEAD
@@ -153,19 +202,13 @@ if [ -f "$CATCHUP" ]; then
   fi
 fi
 
-# ---- step 5: reddit comment (file may not exist — graceful) ----
-REDDIT_CMT="$HOME/.config/mundo-bot/reddit_comment.py"
-if [ -f "$REDDIT_CMT" ]; then
-  run_with_timeout 180 "$PY" "$REDDIT_CMT" >/dev/null 2>&1 \
-    && ACTIONS="${ACTIONS}reddit_cmt_ok " \
-    || ACTIONS="${ACTIONS}reddit_cmt_err "
-else
-  ACTIONS="${ACTIONS}reddit_cmt_missing "
-fi
+# ---- step 5: reddit comment — disabled 2026-05-21 (script never created;
+#                 was polluting logs with reddit_cmt_missing every cycle) ----
 
-# ---- step 6: reddit post (window 15-22 ICT AND last post >4h) ----
+# ---- step 6: reddit post (window 9-22 ICT AND last post >4h) ----
+# 2026-05-21: widened 15-22 → 9-22 (was skipping ~half of morning cycles)
 HOUR=$(date +%H)
-if [ "$HOUR" -ge 15 ] && [ "$HOUR" -le 22 ]; then
+if [ "$HOUR" -ge 9 ] && [ "$HOUR" -le 22 ]; then
   REDDIT_LOG="$HOME/Library/Logs/mundo-bot/reddit_post.log"
   SHOULD_POST=1
   if [ -f "$REDDIT_LOG" ]; then
@@ -200,8 +243,13 @@ if [ -n "$PROFILE" ] && echo "$PROFILE" | $JQ -e . >/dev/null 2>&1; then
     ACTIONS="${ACTIONS}stats_zero_outage(carry_fwd) "
   fi
 else
-  KARMA=$PREV_KARMA; FOLLOWERS=0; POSTS=0; COMMENTS=0; KARMA_DELTA=0
-  ACTIONS="${ACTIONS}stats_api_FAIL "
+  # 2026-05-21 fix E: carry forward ALL metrics on API fail (was wiping
+  # foll/posts/comm to 0 → poisoned daily_review deltas). Read prev state.
+  PREV_FOLL=$(json_get "$STATE" '.followers'); PREV_POSTS=$(json_get "$STATE" '.posts'); PREV_COMM=$(json_get "$STATE" '.comments')
+  KARMA=$PREV_KARMA
+  FOLLOWERS=${PREV_FOLL:-0}; POSTS=${PREV_POSTS:-0}; COMMENTS=${PREV_COMM:-0}
+  KARMA_DELTA=0
+  ACTIONS="${ACTIONS}stats_api_FAIL(carry_fwd) "
 fi
 
 # ---- step 7.5: continuous self-tune (guarded — no-op if API down / low sample) ----

@@ -318,12 +318,42 @@ def load_learnings():
 
 _AUTH_ERRORS = ("not logged in", "please run /login", "authentication", "unauthorized")
 
-def call_haiku(prompt):
-    result = subprocess.run(
-        [CLAUDE_BIN, "--print", "--system-prompt", MUNDO_PERSONA, "--model", "claude-haiku-4-5-20251001", prompt],
-        capture_output=True, text=True, timeout=90, env=env_with_token()
+def _safe_claude_call(model, prompt, timeout):
+    """
+    2026-05-21 fix I: hardened claude --print invocation.
+    Hung claude subprocesses survived subprocess.run(timeout=) on several
+    occasions (87047 ran 9 min vs 180s configured), piling up across cron
+    fires. Use Popen + process group + os.killpg + pkill nuke on timeout.
+    """
+    import signal as _signal
+    cmd = [CLAUDE_BIN, "--print", "--system-prompt", MUNDO_PERSONA,
+           "--model", model, prompt]
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=env_with_token(), start_new_session=True,
     )
-    out = result.stdout.strip()
+    try:
+        out, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        log.warning(f"claude --print timeout {timeout}s model={model} — nuking pgid")
+        try:
+            os.killpg(os.getpgid(proc.pid), _signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        # Belt-and-suspenders: nuke any orphan claude --print for this model
+        subprocess.run(["pkill", "-KILL", "-f", f"claude --print.*{model}"],
+                       capture_output=True)
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        return ""
+    return (out or "").strip()
+
+def call_haiku(prompt):
+    out = _safe_claude_call("claude-haiku-4-5-20251001", prompt, timeout=90)
+    if not out:
+        return ""
     if any(e in out.lower() for e in _AUTH_ERRORS):
         log.error(f"Claude CLI auth error: {out[:80]}")
         raise RuntimeError(f"Claude CLI not authenticated: {out[:80]}")
@@ -333,11 +363,9 @@ def call_haiku(prompt):
 
 def call_opus(prompt):
     """Use Opus 4.7 for high-quality post generation."""
-    result = subprocess.run(
-        [CLAUDE_BIN, "--print", "--system-prompt", MUNDO_PERSONA, "--model", "claude-opus-4-7", prompt],
-        capture_output=True, text=True, timeout=180, env=env_with_token()
-    )
-    out = result.stdout.strip()
+    out = _safe_claude_call("claude-opus-4-7", prompt, timeout=180)
+    if not out:
+        raise RuntimeError("Claude CLI opus call returned empty (timeout nuked)")
     if any(e in out.lower() for e in _AUTH_ERRORS):
         log.error(f"Claude CLI auth error: {out[:80]}")
         raise RuntimeError(f"Claude CLI not authenticated: {out[:80]}")
