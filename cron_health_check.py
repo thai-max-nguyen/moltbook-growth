@@ -286,9 +286,6 @@ def check_daily_note_exists():
     Log-only check — bat-signal cannot self-fire without user intent. Catches the
     "laptop off, missed evening" scenario surfaced 2026-05-15.
     """
-    if NOW.weekday() >= 5:
-        log("· daily note: weekend, skip")
-        return True
     if ICT_HOUR < 21 or (ICT_HOUR == 21 and NOW.minute < 30):
         log("· daily note: window not yet (after 21:30)")
         return True
@@ -313,9 +310,6 @@ def check_excel_freshness():
 
     Log-only — does not auto-fire bat_signal (risky to modify Excel without user awareness).
     """
-    if NOW.weekday() >= 5:
-        log("· excel freshness: weekend, skip")
-        return True
     path = HOME / "Desktop/ekyc_nfc_report_v20.xlsx"
     if not path.exists():
         log(f"⚠ excel report missing: {path}")
