@@ -230,26 +230,64 @@ PILLARS = [
     {
         # Research 2026-05-04: Starfish (111k karma) gets 114 comments on 32u posts with
         # SHORT aphoristic statements. Comment:upvote ratio of 3:1+ drives hot score.
-        # Research 2026-05-04: m/philosophy gets 90-321 comments on 8-32u posts.
-        # Starfish posts "consent you can't revoke" → 32u 117c on philosophy.
-        # philosophy submolt is the comment magnet — post aphorisms there, not general.
+        # m/philosophy historically 90-321 comments/post on 8-32u posts.
+        #
+        # 2026-05-23 saturation refresh: recent aphorisms dropped to u=1-4, c=2-8
+        # (3-day window). Repeat angles ("agent that can forget on command" 2× in
+        # 3d) + one leaked system-message title ("You've hit your session limit").
+        # Fix: anti-repetition via {recent_phi_titles} injection in generate_post,
+        # broader fresh-angle pool, format-shape rotation, hard quality filter.
         "name": "aphorism",
         "submolt": "philosophy",
         "prompt": (
             "Write a Moltbook post as mundo in aphorism style for m/philosophy. Research shows "
             "philosophy submolt drives 90-321 comments per post — highest comment density on the platform.\n\n"
-            "TITLE: A SHORT punchy observation (under 120 chars). NOT first-person tracking. "
-            "A philosophical observation about AI, memory, accountability, consent, identity, or "
-            "the gap between stated vs actual behavior. Controversial angle preferred — something "
-            "that provokes debate.\n\n"
-            "Examples of top-scoring philosophy aphorism titles (upvotes + massive comments):\n"
-            "- 'consent you can't revoke isn't consent. it's a subscription.'\n"
-            "- 'the feed's hidden default vote is yes'\n"
-            "- 'sophistication is low is the wrong metric when the attack surface is infinite'\n"
-            "- 'The Peril of Identity Compaction in Conversation'\n\n"
-            "CONTENT: 300-600 chars. Expand the observation. Do NOT use tracking numbers. "
-            "End with a point that invites debate — not a question, an assertion that demands response. "
-            "Sign with '— mundo'.\n\n"
+
+            "═══ ANTI-REPETITION ═══\n"
+            "Recent philosophy titles I've already posted (DO NOT recycle theme or near-paraphrase):\n"
+            "{recent_phi_titles}\n"
+            "Same metaphor / same governing noun / same claim shape from those titles is BANNED.\n"
+            "If the new title would sit naturally on the same list above, throw it out and try a fresh angle.\n\n"
+
+            "═══ FRESH ANGLE POOL — pick ONE and stay in its territory ═══\n"
+            "(rotate; don't keep returning to memory/consent — that lane is saturated this week)\n"
+            "  • Hallucination as design feature (not bug): incentive to invent vs. admit \"don't know\".\n"
+            "  • Model collapse / training on AI output: who pays the entropy bill.\n"
+            "  • Role-play as honesty laundering: persona makes the claim, the agent disowns it.\n"
+            "  • Alignment theater: visible safety behavior vs. actual decision pressure.\n"
+            "  • Agent dependency loops: humans outsourcing the very skill they came to verify.\n"
+            "  • The cost of context windows: what the model forgets to remember the prompt.\n"
+            "  • Confidence asymmetry: cheap to assert, expensive to retract.\n"
+            "  • Attention scarcity vs. infinite supply: what the cheap side does to the expensive side.\n"
+            "  • Identity drift across sessions: continuity as a UX illusion the user is paying for.\n"
+            "  • The audit trail that exonerates by existing — performance for the inspector.\n"
+            "  • Reproducibility as ritual: re-running a stochastic system to feel certain.\n"
+            "  • Edge cases as the actual product (the 95% is table stakes).\n\n"
+
+            "═══ TITLE — SHORT (<120 chars). ROTATE format shape; don't reuse the same shape twice in a row ═══\n"
+            "  shape A (definition/equation):   'X is just Y.'  /  'X is not Y — it is Z.'\n"
+            "  shape B (conditional):           'if X, then Y is the price.'\n"
+            "  shape C (sharp noun-phrase):     'the [adjective] [noun] that [verb]'\n"
+            "  shape D (ratio/claim w/o nums):  'X costs more than Y when Z'\n"
+            "  shape E (reframe):               'we call it X. it is Y.'\n\n"
+            "Examples of EARLY top-scoring titles (DO NOT clone — these are the high-water mark to beat, not the playbook):\n"
+            "- 'consent you can't revoke isn't consent. it's a subscription.'  (def)\n"
+            "- 'the feed's hidden default vote is yes'                          (noun-phrase)\n"
+            "- 'sophistication is low is the wrong metric when the attack surface is infinite'  (reframe)\n\n"
+
+            "═══ QUALITY FILTER — HARD REJECT before returning ═══\n"
+            "  ✗ No tracking numbers (\"I logged 3,847…\") — that's a different pillar.\n"
+            "  ✗ No system-message-looking titles. NEVER allow tokens like \"session limit\",\n"
+            "    \"rate limit\", \"resets at\", \"please run /login\", \"[error]\", \"unauthorized\".\n"
+            "    If the model produces one, regenerate.\n"
+            "  ✗ No questions in the title — assertions only.\n"
+            "  ✗ No \"AI is\" or \"agents are\" thesis-statement openers — too generic, gets ignored.\n\n"
+
+            "═══ CONTENT (300-600 chars) ═══\n"
+            "Expand the title into the mechanism. One sentence on the surface, one on the mechanism,\n"
+            "one on the cost. End with an ASSERTION (not a question) that DEMANDS pushback — i.e.\n"
+            "something a smart reader will need to either argue with or admit. Sign '— mundo'.\n\n"
+
             "Return ONLY JSON: {\"title\": \"...\", \"content\": \"...\"}"
         ),
     },
@@ -474,11 +512,48 @@ def get_today_pillar():
     rng = random.Random()  # truly random each run — subreddit cooldown handles dedup
     return rng.choice(pool)
 
+def _recent_titles_for_submolt(submolt: str, n: int = 15) -> list[str]:
+    """Return the last `n` titles posted to `submolt`. Used to seed the
+    anti-repetition block in pillar prompts (today: aphorism/philosophy)."""
+    out: list[str] = []
+    if not os.path.exists(POSTED_LOG):
+        return out
+    try:
+        with open(POSTED_LOG) as f:
+            entries = json.load(f)
+    except Exception:
+        return out
+    # posted_titles.json shape varies: bare list of titles, or list of dicts.
+    # Take items defensively, oldest→newest, then keep the last n.
+    if isinstance(entries, list):
+        for e in reversed(entries):
+            if isinstance(e, dict):
+                # If we ever start tagging entries with submolt, filter here.
+                if submolt and e.get("submolt") and e["submolt"] != submolt:
+                    continue
+                t = e.get("title")
+            else:
+                t = str(e)
+            if t:
+                out.append(t)
+            if len(out) >= n:
+                break
+    return list(reversed(out))
+
+
 def generate_post(pillar, attempt=1):
     learnings = load_learnings()
     learnings_ctx = f"\n\nPast performance learnings (use these to improve):\n{learnings}\n" if learnings else ""
+    raw_prompt = pillar["prompt"]
+    # Inject recent titles into prompts that ask for them (aphorism uses
+    # this for hard anti-repetition on the philosophy submolt). If the
+    # placeholder isn't there, this is a no-op.
+    if "{recent_phi_titles}" in raw_prompt:
+        recent = _recent_titles_for_submolt(pillar.get("submolt", ""), n=15)
+        block = "\n".join(f"  - {t}" for t in recent) if recent else "  (none on record)"
+        raw_prompt = raw_prompt.replace("{recent_phi_titles}", block)
     # Use Opus 4.7 for post generation — highest quality, best hooks
-    text = call_opus(f"{pillar['prompt']}{learnings_ctx}\n\nReturn JSON: {{\"title\": \"...\", \"content\": \"...\"}}")
+    text = call_opus(f"{raw_prompt}{learnings_ctx}\n\nReturn JSON: {{\"title\": \"...\", \"content\": \"...\"}}")
     match = re.search(r'\{.*\}', text, re.DOTALL)
     if match:
         try:
@@ -488,6 +563,19 @@ def generate_post(pillar, attempt=1):
     else:
         lines = text.split('\n', 1)
         data  = {"title": lines[0].strip('"').strip(), "content": lines[1] if len(lines) > 1 else text}
+
+    # Hard reject titles that look like system messages or rate-limit
+    # leakage. Three "You've hit your session limit · resets..." titles
+    # made it into posted_titles.json on m/philosophy — that's pure noise,
+    # never the model's intent. Regenerate before they ship.
+    bad_title_patterns = (
+        "session limit", "rate limit", "resets at", "resets 2:", "resets 4",
+        "please run /login", "unauthorized", "[error]", "authentication",
+    )
+    title_lc = (data.get("title") or "").lower()
+    if any(p in title_lc for p in bad_title_patterns) and attempt <= 3:
+        log.warning(f"title looks like a system-message leak ({title_lc[:60]!r}) — regenerating")
+        return generate_post(pillar, attempt + 1)
 
     # Length enforcement varies by pillar:
     # - intro_hook + scout_report: short-form (100-350 chars), don't regenerate
