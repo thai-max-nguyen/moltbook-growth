@@ -102,17 +102,18 @@ fi
 
 # ── Step 3: force Chrome to load reddit.com (will mint fresh JWT if
 # session still authenticated). Then wait + retry recover.
-log "step 3: nudging Chrome to load reddit.com"
-/usr/bin/open -ga "Google Chrome" "https://www.reddit.com/"
-osascript <<'AS' 2>>"${LOG}" || true
-tell application "Google Chrome"
-  if (count of windows) > 0 then
-    set t to make new tab at end of tabs of front window with properties {URL:"https://www.reddit.com/"}
-    delay 6
-    reload t
-  end if
-end tell
-AS
+# Uses chrome_open_or_focus.sh to focus + reload an existing reddit tab if
+# one is already open — prevents the multi-tab pileup bug (this cron fires
+# every 30min; pre-fix it spawned a new tab per fire = ~15 dupes/day).
+log "step 3: nudging Chrome to load reddit.com (focus existing tab if any)"
+OPEN_HELPER="${HOME}/.config/morning-workflow/chrome_open_or_focus.sh"
+if [ -x "${OPEN_HELPER}" ]; then
+  RESULT=$("${OPEN_HELPER}" "https://www.reddit.com/" "reddit.com" 2>&1 || echo "helper-err")
+  log "  chrome_open_or_focus: ${RESULT}"
+else
+  log "  ⚠ ${OPEN_HELPER} missing — falling back to legacy new-tab open"
+  /usr/bin/open -ga "Google Chrome" "https://www.reddit.com/"
+fi
 sleep 8
 "${PY}" "${RECOVER}" >> "${LOG}" 2>&1 || true
 if is_alive; then
