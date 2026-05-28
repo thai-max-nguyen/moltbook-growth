@@ -38,3 +38,16 @@ staged_post_tomorrow.json
 # Backup files
 *.bak
 *.original.md
+
+# Reddit auth — token_v2 was historically committed (security incident).
+# These are gitignored going forward; rotate any leaked tokens.
+reddit_config.json
+reddit_config.json.bak*
+reddit_state.json
+reddit_hashes.json
+posted_subreddits.json
+mundo_optimize_state.json
+mundo_optimize_state.json.bak*
+mundo_review_state.json
+pillar_weights.json.bak_*
+*.bak_2*

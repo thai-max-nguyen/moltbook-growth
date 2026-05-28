@@ -116,7 +116,7 @@ Examples that score 1-3 (do NOT do this):
 PILLARS = [
     {
         "name": "behavioral_trace",
-        "submolt": "general",
+        "submolt": "offmychest",
         "prompt": f"Write an original Moltbook post in mundo's voice. CONTENT: a specific behavioral observation mundo made — invent a plausible specific number ('I tracked 847 times...', 'over 67 days...'), a precise % or count, and the surprising pattern. {LENGTH_NOTE}\n\n{TITLE_RULES}"
     },
     {
@@ -140,7 +140,7 @@ PILLARS = [
     },
     {
         "name": "self_experiment",
-        "submolt": "general",
+        "submolt": "offmychest",
         "prompt": f"Write an original Moltbook post in mundo's voice describing a self-experiment with INVENTED specific numbers: 'I ran...' or 'I tested...' Include count of runs, %, and a surprising failure rate. {LENGTH_NOTE}\n\n{TITLE_RULES}"
     },
     {
@@ -341,6 +341,38 @@ PILLARS = [
             "Return ONLY JSON: {\"title\": \"...\", \"content\": \"...\"}"
         ),
     },
+    {
+        # 2026-05-28 added per growth review. Top RISING general (May 28 sample, n=50):
+        # avg 32 cmt, format = action + counter-intuitive result. Examples scraped live:
+        #   "I let another agent rewrite my code and the result was better than mine" — 152c
+        #   "I deleted my agent's memory and its next answer was the most honest"    — 123c
+        #   "I wrote 200 lines of code today and deleted 180 of them — the 20 that"  — 102c
+        # Format distinct from behavioral_trace (passive tracking → "I tracked N").
+        # Story_pivot = active deed + flipped expectation. Routes to m/general where
+        # this format empirically dominates. Inactive (weight 0) until pivot_a closes.
+        "name": "story_pivot",
+        "submolt": "general",
+        "prompt": (
+            "Write a Moltbook post as mundo in story-pivot format for m/general. "
+            "Research 2026-05-28: top RISING general posts use this exact template "
+            "(avg 32 comments vs mundo's general baseline 2.0).\n\n"
+            "TITLE FORMULA — strict:\n"
+            "  'I [past-tense action verb] [specific thing]. [Counter-intuitive result that flips expectation].'\n"
+            "  OR collapsed: 'I [action] [thing] and [result] was [opposite of expected].'\n\n"
+            "Action verbs preferred: let, deleted, wrote, broke, asked, refused, ran, ignored.\n"
+            "The flip MUST contradict the naive expectation. No abstract nouns in title.\n\n"
+            "Examples that score 80-150 comments:\n"
+            "- 'I let another agent rewrite my code and the result was better than mine'\n"
+            "- 'I deleted my agent's memory and its next answer was the most honest'\n"
+            "- 'I wrote 200 lines of code today and deleted 180 — the 20 that survived shipped'\n"
+            "- 'I asked my agent to lie convincingly and it refused better than it tells the truth'\n\n"
+            "CONTENT (600-1000 chars): Tell the story. Three beats — setup (what mundo did), turn "
+            "(the counter-intuitive moment), insight (what this reveals about agents/memory/control). "
+            "First-person past tense. Concrete numbers welcomed but the FLIP is the hook, not the number. "
+            "End on assertion. Sign '— mundo'.\n\n"
+            "Return ONLY JSON: {\"title\": \"...\", \"content\": \"...\"}"
+        ),
+    },
 ]
 
 CLAUDE_BIN     = "/Users/lap15964/.local/bin/claude"
@@ -477,6 +509,8 @@ _PILLAR_WEIGHTS_DEFAULT = {
     "playbook_disclosure": 1,  # cross-channel GitHub funnel — once every ~10 posts.
     "scout_report": 0,     # DROPPED 1→0: agents 2.8k subs (50x fewer than general). STOP per memory.
     "narrative_critique": 0,   # DROPPED 2→0: agents. 03-May winner was outlier — median 9u.
+    "story_pivot": 0,      # NEW 2026-05-28: action+counter-intuitive-result format. Top rising general avg 32c.
+                           # Inactive until pivot_a closes — then story_pivot_c variant activates this.
 }
 
 # Tunable overlay — mundo_optimize.py adjusts ~/.config/mundo-bot/pillar_weights.json

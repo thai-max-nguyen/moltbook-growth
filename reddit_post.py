@@ -47,6 +47,12 @@ KARMA_FOR_FAST_MODE = 100   # above this, drop to 90-180s between comments
 FAST_DELAY_MIN_S    = 90
 FAST_DELAY_MAX_S    = 180
 KARMA_FOR_SUB_POSTS = 50    # below this, only profile posts (others auto-removed)
+# 2026-05-28: tolerant-sub threshold — r/SideProject + r/IndieDev allow show-and-tell
+# from accounts with karma >= 25. Below this stays profile-only; between 25-49,
+# pick_subreddit() can attempt one tolerant sub per day (still falls back to profile
+# if pillar's primary subs aren't in the tolerant list).
+KARMA_FOR_TOLERANT_POSTS = 25
+TOLERANT_SUBS = {"SideProject", "IndieDev", "ThisorThatSubreddit"}
 
 # === GitHub repos (used by promo pillars + signature footer) ===
 GITHUB_REPOS = {
@@ -324,8 +330,19 @@ def pick_subreddit(pillar, state, total_karma):
     3. Fallback to first available
     """
     profile = "u_Initial-Process-2875"
+    if total_karma < KARMA_FOR_TOLERANT_POSTS:
+        log.info(f"karma={total_karma} < {KARMA_FOR_TOLERANT_POSTS} → profile-only mode")
+        return profile
+
+    # 2026-05-28 mid-tier: try ONE tolerant sub if karma is in 25..49 range.
+    # This catches r/SideProject + r/IndieDev which tolerate ~25 karma posters.
     if total_karma < KARMA_FOR_SUB_POSTS:
-        log.info(f"karma={total_karma} < {KARMA_FOR_SUB_POSTS} → profile-only mode")
+        tolerant_in_pillar = [s for s in pillar["subreddits"] if s in TOLERANT_SUBS and subreddit_cooldown_ok(state, s)]
+        if tolerant_in_pillar:
+            pick = random.choice(tolerant_in_pillar)
+            log.info(f"karma={total_karma} → tolerant-sub mode (try r/{pick} before profile fallback)")
+            return pick
+        log.info(f"karma={total_karma} < {KARMA_FOR_SUB_POSTS} (no tolerant sub matched) → profile-only")
         return profile
 
     candidates = [s for s in pillar["subreddits"] if subreddit_cooldown_ok(state, s)]
@@ -406,11 +423,16 @@ def comment_on_feed(cfg, state, hashes, total_karma):
     Below karma threshold, prioritize high-volume subs to escape profile-only mode faster."""
     if total_karma < KARMA_FOR_SUB_POSTS:
         # Karma push: high-traffic subs that allow non-promo comments + reward useful replies fast.
+        # 2026-05-28 expanded — current karma=33, needs 17 more to escape profile-only.
+        # Added AskReddit/NoStupidQuestions/ELI5/personalfinance for volume; mods lenient,
+        # casual replies earn 5-30 karma fast. Bonus: r/agentdev / r/LocalLLaMA fit voice.
         target_subs = ["learnprogramming", "webdev", "Python", "programming",
                        "cscareerquestions", "AskProgramming", "ExperiencedDevs", "SideProject",
-                       "selfhosted", "productivity", "QuantifiedSelf", "opensource"]
-        MAX = 4  # push harder while sub-locked
-    else:
+                       "selfhosted", "productivity", "QuantifiedSelf", "opensource",
+                       "AskReddit", "NoStupidQuestions", "explainlikeimfive",
+                       "LocalLLaMA", "MachineLearning", "ArtificialInteligence",
+                       "macapps", "IndieDev", "ChatGPT"]
+        MAX = 6  # 2026-05-28: 4→6 — escape velocity push (need ~17 karma, ~3/cmt avg)
         target_subs = ["selfhosted", "productivity", "SideProject", "macapps",
                        "QuantifiedSelf", "opensource", "Python", "IndieDev"]
         MAX = 3 if total_karma >= KARMA_FOR_FAST_MODE else 2
@@ -432,8 +454,11 @@ def comment_on_feed(cfg, state, hashes, total_karma):
             if post.get("stickied") or "megathread" in (post.get("title") or "").lower():
                 state[f"seen_{pid}"] = True
                 continue
-            min_ratio = 0.75 if total_karma < KARMA_FOR_SUB_POSTS else 0.85
-            min_score = 5 if total_karma < KARMA_FOR_SUB_POSTS else 10
+            # 2026-05-28: loosened karma-push filters — was missing ~30% of viable posts.
+            # min_score 5→3 widens the candidate pool 1.6x; min_ratio 0.75→0.70 lets
+            # contested-but-active threads in (those generate replies + thus more karma).
+            min_ratio = 0.70 if total_karma < KARMA_FOR_SUB_POSTS else 0.85
+            min_score = 3 if total_karma < KARMA_FOR_SUB_POSTS else 10
             if (post.get("upvote_ratio") or 0) < min_ratio or (post.get("score") or 0) < min_score:
                 continue
             if post.get("locked") or post.get("archived"):

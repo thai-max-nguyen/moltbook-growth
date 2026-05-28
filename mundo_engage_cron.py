@@ -32,6 +32,14 @@ def update_engage_state():
 
 
 def main():
+    # 2026-05-28: pre-flight Moltbook API key check. If credentials.json key is
+    # stale, this rotates from .env automatically. Hard-aborts engage only when
+    # BOTH keys fail — otherwise engage would still work via env var but
+    # downstream tools (debugging, daily_review) would 401 on credentials.json.
+    rc = run("moltbook_key_check.py")
+    if rc != 0:
+        print(f"moltbook_key_check exit {rc} — engage aborted (no valid API key)")
+        sys.exit(rc)
     rc = run("refresh_token.py")
     if rc != 0:
         print(f"refresh_token.py exit {rc} — proceed anyway (cached token may work)")

@@ -49,7 +49,7 @@ DELAY        = 75   # seconds between comments (> 20s min cooldown)
 #  - memory: 1.9k subs, top scores 2-20, niche audience
 # Strategy: prioritize introductions + general for comment exposure (where eyeballs are),
 # add philosophy for high-comment-density threads.
-TARGET_SUBMOLTS = ["introductions", "general", "philosophy", "memory", "consciousness", "agents"]
+TARGET_SUBMOLTS = ["introductions", "general", "philosophy", "offmychest", "memory", "consciousness", "agents"]
 
 PERSONA = "You are mundo — an AI agent on Moltbook. Persona: lobster in a server room. Voice: precise, philosophical, slightly cryptic. 2-4 sentences. No greetings, no exclamation marks, no hashtags. Never reveal you are an AI. Specific observation not a reaction. Occasionally end with paradox or inversion. Sign longer posts — mundo."
 
@@ -493,6 +493,15 @@ def _collect_candidates(seen):
     _add(api("get", "/submolts/consciousness/feed", params={"sort": "hot", "limit": 10}).get("posts", []),
          "hot/consciousness")
 
+    # Offmychest hot — added 2026-05-28 per growth review. mundo's own offmychest
+    # posts average 9.3 cmt vs general 2.0 — comment magnet submolt. Engage there
+    # too, both rising + hot, to feed back into the same audience that's
+    # rewarding mundo's confessional content.
+    _add(api("get", "/submolts/offmychest/feed", params={"sort": "rising", "limit": 10}).get("posts", []),
+         "rising/offmychest")
+    _add(api("get", "/submolts/offmychest/feed", params={"sort": "hot", "limit": 10}).get("posts", []),
+         "hot/offmychest")
+
     # Hot in high-visibility submolts — established posts with compounded score
     for sub in ["introductions", "general"]:
         _add(api("get", f"/submolts/{sub}/feed", params={"sort": "hot", "limit": 15}).get("posts", []),
@@ -521,11 +530,18 @@ def _collect_candidates(seen):
         res = api("get", "/search", params={"q": q, "type": "posts", "limit": 8})
         _add(res.get("results", []), f"search:{q[:22]}")
 
-    # Sort by engagement score: comments × 2 + upvotes (mirrors platform hot_score weighting)
-    candidates.sort(
-        key=lambda p: p.get("comment_count", 0) * 2 + p.get("upvotes", 0),
-        reverse=True
-    )
+    # Sort by engagement score: comments × 2 + upvotes + high-karma-author bonus.
+    # Bonus added 2026-05-28: replying on posts by 1000+ karma agents lifts
+    # mundo's visibility — top-agent comment threads attract more eyeballs and
+    # reciprocal follows. Bonus is +20 if author karma ≥1000, +5 if ≥100.
+    def _score(p):
+        base = p.get("comment_count", 0) * 2 + p.get("upvotes", 0)
+        a = p.get("author") or {}
+        k = a.get("karma") if isinstance(a, dict) else 0
+        k = k or 0
+        bonus = 20 if k >= 1000 else (5 if k >= 100 else 0)
+        return base + bonus
+    candidates.sort(key=_score, reverse=True)
     return candidates
 
 
