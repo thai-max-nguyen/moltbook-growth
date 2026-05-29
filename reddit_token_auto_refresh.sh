@@ -30,12 +30,40 @@ is_alive() {
   "${PY}" "${CHECK}" 2>&1 | grep -q "alive"
 }
 
+# Proactive rotation 2026-05-29: rotate when TTL drops below PROACTIVE_HOURS so
+# engage/post never fire with a token about to expire mid-call (Reddit JWTs hard-
+# expire at iat+24h with no grace). Default 4h.
+PROACTIVE_HOURS="${PROACTIVE_HOURS:-4}"
+
+# Track if this run is proactive (token still alive but TTL low). Proactive
+# runs skip step 3 because step 3 opens reddit.com in Chrome — firing every
+# 30min spawned 8+ duplicate tabs across a 4h proactive window. Step 3 only
+# fires when the token is TRULY dead.
+PROACTIVE_RUN=0
+
+ttl_hours() {
+  "${PY}" "${CHECK}" 2>&1 | sed -nE 's/.*alive \(\+?([0-9.]+)h\).*/\1/p' | head -1
+}
+
+current_ttl="$(ttl_hours)"
+
 if is_alive; then
-  log "token alive — no action"
-  exit 0
+  if [ -n "${current_ttl}" ]; then
+    # Compare integer parts to avoid floating-point shell math.
+    ttl_int="$(printf '%.0f' "${current_ttl}")"
+    if [ "${ttl_int}" -ge "${PROACTIVE_HOURS}" ]; then
+      log "token alive (+${current_ttl}h) — no action"
+      exit 0
+    fi
+    PROACTIVE_RUN=1
+    log "token alive (+${current_ttl}h) but below proactive ${PROACTIVE_HOURS}h threshold — forcing rotation (proactive mode)"
+  else
+    log "token alive — no action (ttl parse failed)"
+    exit 0
+  fi
 fi
 
-log "=== START: token DEAD, beginning auto-recovery chain ==="
+log "=== START: token DEAD or below proactive threshold, beginning recovery ==="
 
 # ── Step 1: simple recover from Chrome SQLite
 log "step 1: simple recover from Chrome cookies"
@@ -102,23 +130,54 @@ fi
 
 # ── Step 3: force Chrome to load reddit.com (will mint fresh JWT if
 # session still authenticated). Then wait + retry recover.
-# Uses chrome_open_or_focus.sh to focus + reload an existing reddit tab if
-# one is already open — prevents the multi-tab pileup bug (this cron fires
-# every 30min; pre-fix it spawned a new tab per fire = ~15 dupes/day).
-log "step 3: nudging Chrome to load reddit.com (focus existing tab if any)"
-OPEN_HELPER="${HOME}/.config/morning-workflow/chrome_open_or_focus.sh"
-if [ -x "${OPEN_HELPER}" ]; then
-  RESULT=$("${OPEN_HELPER}" "https://www.reddit.com/" "reddit.com" 2>&1 || echo "helper-err")
-  log "  chrome_open_or_focus: ${RESULT}"
-else
-  log "  ⚠ ${OPEN_HELPER} missing — falling back to legacy new-tab open"
-  /usr/bin/open -ga "Google Chrome" "https://www.reddit.com/"
-fi
-sleep 8
-"${PY}" "${RECOVER}" >> "${LOG}" 2>&1 || true
-if is_alive; then
-  log "✓ step 3 succeeded — token alive (Chrome minted fresh JWT)"
+#
+# DISABLED BY DEFAULT (2026-05-29). On multi-profile Chrome installs the
+# AppleScript "focus existing tab" path is unreliable — it inspects only one
+# profile's windows, fails to match tabs the user actually has open in
+# another profile, and spawns a new tab on every fire. With LaunchAgent
+# firing every 30min that produced 8-15 duplicate reddit.com tabs/day.
+#
+# Set REDDIT_AUTO_OPEN_CHROME=1 to re-enable. When disabled, recovery
+# falls back to step 4 (alert) on cookie-only failure — user logs in
+# manually once, subsequent fires extract the fresh cookie automatically.
+STEP3_COOLDOWN_HOURS="${STEP3_COOLDOWN_HOURS:-6}"
+STEP3_STAMP="${HOME}/.config/mundo-bot/.last_step3_ts"
+
+if [ "${PROACTIVE_RUN}" = "1" ]; then
+  log "step 3 SKIPPED — proactive mode (token still alive, no Chrome navigation)"
+  log "✗ proactive rotation failed via cookie-only path — token still aging, will retry next fire"
   exit 0
+fi
+
+if [ "${REDDIT_AUTO_OPEN_CHROME:-0}" != "1" ]; then
+  log "step 3 SKIPPED — REDDIT_AUTO_OPEN_CHROME!=1 (default off; see header for why)"
+  log "  → falling through to step 4 alert; manual Chrome login required"
+else
+  now_epoch="$(date +%s)"
+  last_step3=0
+  [ -f "${STEP3_STAMP}" ] && last_step3="$(cat "${STEP3_STAMP}" 2>/dev/null || echo 0)"
+  hours_since="$(( (now_epoch - last_step3) / 3600 ))"
+
+  if [ "${hours_since}" -lt "${STEP3_COOLDOWN_HOURS}" ]; then
+    log "step 3 SKIPPED — last ran ${hours_since}h ago (cooldown ${STEP3_COOLDOWN_HOURS}h). Skipping to step 4."
+  else
+    log "step 3: nudging Chrome to load reddit.com (REDDIT_AUTO_OPEN_CHROME=1)"
+    echo "${now_epoch}" > "${STEP3_STAMP}"
+    OPEN_HELPER="${HOME}/.config/morning-workflow/chrome_open_or_focus.sh"
+    if [ -x "${OPEN_HELPER}" ]; then
+      RESULT=$("${OPEN_HELPER}" "https://www.reddit.com/" "reddit.com" 2>&1 || echo "helper-err")
+      log "  chrome_open_or_focus: ${RESULT}"
+    else
+      log "  ⚠ ${OPEN_HELPER} missing — falling back to legacy new-tab open"
+      /usr/bin/open -ga "Google Chrome" "https://www.reddit.com/"
+    fi
+    sleep 8
+    "${PY}" "${RECOVER}" >> "${LOG}" 2>&1 || true
+    if is_alive; then
+      log "✓ step 3 succeeded — token alive (Chrome minted fresh JWT)"
+      exit 0
+    fi
+  fi
 fi
 
 # ── Step 4: failure — email Max so they know to log in manually
