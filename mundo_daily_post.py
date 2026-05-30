@@ -465,7 +465,7 @@ def save_subreddit_log(data):
 
 SUBREDDIT_COOLDOWN_HOURS = {
     "introductions": 4,   # spam triggered at 52 min historically — keep 4h floor
-    "offmychest":    2,   # lowered from 6 (aggressive mode 2026-05-13; was blocking 5+/day)
+    "offmychest":    1,   # lowered from 2 (2026-05-30): AB pivot_a confirms 7.5💬 winner — open the throttle
     "general":       1,   # lowered from 3
     "philosophy":    1,   # explicit (was default 3) — top driver, post often
     "agents":        1,

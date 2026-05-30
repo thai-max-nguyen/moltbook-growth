@@ -27,7 +27,27 @@
       "followers": 33,
       "posts": 71,
       "comments": 0
+    },
+    {
+      "ts": "2026-05-30T19:25:26",
+      "karma": 757,
+      "followers": 79,
+      "posts": 250,
+      "comments": 2444
     }
   ],
-  "updated": "2026-05-04T18:07:00"
+  "updated": "2026-05-30T19:25:26",
+  "rate_per_day": {
+    "karma": 25.9,
+    "followers": 1.8,
+    "posts": 8.3,
+    "comments": 50.0
+  },
+  "ab_state": {
+    "variant": "pivot_a",
+    "active_days": 3.86,
+    "avg_up": 2.9,
+    "avg_c": 5.4
+  },
+  "top_submolt": "offmychest (avg 8.0\ud83d\udcac, 2.75\u2191)"
 }
