@@ -204,6 +204,13 @@ def main():
     stats["top_posts"]  = top_posts  # cache for reference
     save_stats(stats)
     print(f"Vault updated. Insights preview: {insights[:150]}")
+    # Loud success marker — used by cron_health_check + log audits to detect a
+    # healthy sync without scraping the noisy "Vault updated" line. Mirrors the
+    # mundo_daily_post `✓ posted` pattern so tooling can grep one shape.
+    import datetime as _dt
+    print(f"[{_dt.datetime.now().strftime('%Y-%m-%d %H:%M')}] === done · "
+          f"karma={snap['karma']} followers={snap['followers']} "
+          f"posts={snap['posts']} comments={snap['comments']} ===")
 
 if __name__ == "__main__":
     main()

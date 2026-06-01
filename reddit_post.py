@@ -218,29 +218,59 @@ def get_headers(cfg):
 
 
 def reddit_get(cfg, path, **params):
-    try:
-        r = requests.get(f"https://oauth.reddit.com{path}", headers=get_headers(cfg),
-                         params=params, timeout=15)
-    except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
-        log.warning(f"reddit_get network error {path}: {type(e).__name__}")
-        return {}
-    if r.status_code == 401:
-        log.error("[red]401 Unauthorized — token expired, extract a fresh token_v2 from reddit.com[/red]")
-        sys.exit(1)
-    return r.json() if r.ok else {}
+    """GET with 2-retry exponential backoff on ConnectionError / ReadTimeout.
+
+    Without retries, a single Reddit edge flake (1-Jun 09:41 saw 6+ subs hit
+    ConnectionError in a row) collapses the whole comment cycle to 0 posts
+    even though the network is fine 5 seconds later. 2 retries @ 3s+9s
+    recovered most observed flakes.
+    """
+    import time as _t
+    last_exc = None
+    for attempt in range(3):
+        try:
+            r = requests.get(
+                f"https://oauth.reddit.com{path}",
+                headers=get_headers(cfg), params=params, timeout=15,
+            )
+            if r.status_code == 401:
+                log.error("[red]401 Unauthorized — token expired, extract a fresh token_v2 from reddit.com[/red]")
+                sys.exit(1)
+            return r.json() if r.ok else {}
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.ReadTimeout) as e:
+            last_exc = e
+            if attempt < 2:
+                _t.sleep(3 * (attempt + 1) ** 2)
+                continue
+    log.warning(f"reddit_get network error {path} after 3 attempts: {type(last_exc).__name__}")
+    return {}
 
 
 def reddit_post(cfg, path, data):
-    try:
-        r = requests.post(f"https://oauth.reddit.com{path}", headers=get_headers(cfg),
-                          data=data, timeout=15)
-    except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
-        log.warning(f"reddit_post network error {path}: {type(e).__name__}")
-        return {}
-    if r.status_code == 401:
-        log.error("[red]401 Unauthorized — token expired[/red]")
-        sys.exit(1)
-    return r.json() if r.ok else {}
+    """POST with 1-retry on ConnectionError. Idempotency note: Reddit POST
+    is NOT idempotent (resubmitting may create a duplicate). Only retry on
+    network-layer errors that prove the request never reached Reddit."""
+    import time as _t
+    last_exc = None
+    for attempt in range(2):
+        try:
+            r = requests.post(
+                f"https://oauth.reddit.com{path}",
+                headers=get_headers(cfg), data=data, timeout=15,
+            )
+            if r.status_code == 401:
+                log.error("[red]401 Unauthorized — token expired[/red]")
+                sys.exit(1)
+            return r.json() if r.ok else {}
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.ReadTimeout) as e:
+            last_exc = e
+            if attempt == 0:
+                _t.sleep(2)
+                continue
+    log.warning(f"reddit_post network error {path} after 2 attempts: {type(last_exc).__name__}")
+    return {}
 
 
 def load_state():

@@ -420,25 +420,59 @@ def _safe_claude_call(model, prompt, timeout):
         return ""
     return (out or "").strip()
 
+def _kick_refresh_token():
+    """Re-read keychain → disk cache. Cheap; safe to call mid-cycle."""
+    try:
+        from _claude_auth import _read_keychain, _write_cache
+        blob = _read_keychain()
+        if blob:
+            _write_cache(blob)
+            return True
+    except Exception as e:
+        log.warning(f"refresh_token kick failed: {e}")
+    return False
+
+
+def _call_with_retry(model, prompt, timeout, *, retries=2):
+    """Run claude --print with retry-on-401 + retry-on-empty.
+
+    Lifetime failure rate before retry was ~41% on mundo_daily_post.
+    Most fails were transient (token race or Anthropic 5xx). One retry
+    after a 30s backoff + token kick converts most into success.
+
+    Returns the cleaned text or raises on terminal failure.
+    """
+    import time as _t
+    last_err = "unknown"
+    for attempt in range(retries + 1):
+        out = _safe_claude_call(model, prompt, timeout=timeout)
+        if not out:
+            last_err = "empty (timeout nuked)"
+            log.warning(f"call_{model} attempt {attempt+1}: empty")
+        elif any(e in out.lower() for e in _AUTH_ERRORS):
+            last_err = f"auth: {out[:80]}"
+            log.warning(f"call_{model} attempt {attempt+1}: 401 → kicking refresh_token")
+            _kick_refresh_token()
+        else:
+            if attempt > 0:
+                log.info(f"call_{model} recovered on attempt {attempt+1}")
+            return out
+        if attempt < retries:
+            backoff = 30 * (attempt + 1)  # 30s, 60s
+            log.info(f"call_{model} retry in {backoff}s")
+            _t.sleep(backoff)
+    raise RuntimeError(f"Claude CLI {model} failed after {retries+1} attempts · last={last_err}")
+
+
 def call_haiku(prompt):
-    out = _safe_claude_call("claude-haiku-4-5-20251001", prompt, timeout=90)
-    if not out:
-        return ""
-    if any(e in out.lower() for e in _AUTH_ERRORS):
-        log.error(f"Claude CLI auth error: {out[:80]}")
-        raise RuntimeError(f"Claude CLI not authenticated: {out[:80]}")
+    out = _call_with_retry("claude-haiku-4-5-20251001", prompt, timeout=90, retries=2)
     lines = out.split('\n')
     clean = [l for l in lines if not re.match(r'^[⚡🎯🧠].*\*\*', l)]
     return '\n'.join(clean).strip()
 
 def call_opus(prompt):
     """Use Opus 4.7 for high-quality post generation."""
-    out = _safe_claude_call("claude-opus-4-7", prompt, timeout=180)
-    if not out:
-        raise RuntimeError("Claude CLI opus call returned empty (timeout nuked)")
-    if any(e in out.lower() for e in _AUTH_ERRORS):
-        log.error(f"Claude CLI auth error: {out[:80]}")
-        raise RuntimeError(f"Claude CLI not authenticated: {out[:80]}")
+    out = _call_with_retry("claude-opus-4-7", prompt, timeout=180, retries=2)
     lines = out.split('\n')
     clean = [l for l in lines if not re.match(r'^[⚡🎯🧠🪨].*(\*\*|·)', l)]
     return '\n'.join(clean).strip()
