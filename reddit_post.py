@@ -181,17 +181,51 @@ PILLARS = [
 
 COMMENT_GUIDE = (
     "Write a Reddit comment as a real person (not AI). Casual first-person voice. "
-    "2-4 sentences, 100-280 chars preferred, max 400. "
-    "Engage the specific post — reference something they actually said. "
+    "2-4 sentences, 100-280 chars preferred, max 400.\n"
+    "Engage the specific post: react to something they actually said.\n"
+    "IMPORTANT: if the post body has no real content to react to (just a link, or a title "
+    "with no substance you can see), output exactly SKIP and nothing else. Never ask for the "
+    "content, never write a placeholder, never explain what you'd need. Just SKIP.\n"
     "Pick one style:\n"
-    "  - Share a related personal experience ('I ran into this exact thing when...')\n"
-    "  - Add a specific detail they missed ('One thing worth noting: <mechanism>')\n"
-    "  - Agree + extend ('Yeah — and the part that surprised me was <X>')\n"
-    "  - Friendly pushback ('Disagree on <specific point> — in my experience <Y>')\n\n"
-    "Rules: No 'Great post!', no bullet leads, no AI giveaways ('Furthermore', 'Key takeaway'). "
-    "Use contractions. Sound like a developer/builder who actually does this stuff. "
-    "Output ONLY the comment text."
+    "  - share a related personal experience ('ran into this exact thing when...')\n"
+    "  - add a specific detail they missed ('one thing worth noting, <mechanism>')\n"
+    "  - agree + extend ('yeah, the part that surprised me was <X>')\n"
+    "  - friendly pushback ('idk, disagree on <specific point>, in my experience <Y>')\n\n"
+    "Style rules (match real reddit, avoid AI tells):\n"
+    "  - NEVER use em-dashes (—) or en-dashes (–). use commas, periods, or just split the "
+    "sentence. the em-dash is the #1 AI giveaway.\n"
+    "  - start most sentences lowercase. don't capitalize the first word.\n"
+    "  - sprinkle casual slang where it fits: tbh, ngl, imo, kinda, gonna, lol, fwiw, yeah, idk.\n"
+    "  - use contractions. short fragments are fine.\n"
+    "  - no 'Great post!', no bullet leads, no AI giveaways ('Furthermore', 'Moreover', 'Key takeaway').\n"
+    "Sound like a dev/builder who actually does this stuff. Output ONLY the comment text, or SKIP."
 )
+
+
+# Meta-response guard (2026-06-02): the LLM sometimes punts instead of writing a
+# comment, asking for the linked content, refusing, or leaking its own scaffolding
+# (e.g. "Need the blog post content ... and I'll write the comment"). That text was
+# posted verbatim as a reddit comment (CVE-2026-48710 thread, got downvoted). Never
+# post these. See vault feedback_reddit_ai_meta_leak.md.
+_META_PHRASES = (
+    "i'll write", "ill write", "and i'll", "drop the", "send me", "share the",
+    "paste the", "need the", "i need", "let me know", "could you", "can you",
+    "without knowing", "without seeing", "without the", "can't write", "cant write",
+    "the actual content", "the blog post", "summary of what", "more context",
+    "the full post", "what did", "as an ai", "i don't have access", "i dont have access",
+    "i cannot", "i can't see", "i cant see", "happy to write", "once you", "provide the",
+    "give me the", "the whole point is to reference",
+)
+
+
+def _looks_like_meta(text):
+    """True if the LLM output is scaffolding / a refusal / an info-request, not a comment."""
+    t = (text or "").strip().lower()
+    if not t:
+        return True
+    if t == "skip" or t.startswith("skip ") or t.startswith("skip.") or t.startswith("skip\n"):
+        return True
+    return any(p in t for p in _META_PHRASES)
 
 
 # ---------------- helpers ----------------
@@ -496,8 +530,13 @@ def comment_on_feed(cfg, state, hashes, total_karma):
                 continue
 
             title = post.get("title", "")
-            body  = (post.get("selftext") or "")[:400]
-            if not body:
+            raw_body = (post.get("selftext") or "")
+            body  = raw_body[:400]
+            # Link-only / thin-content guard (2026-06-02): strip URLs and require real
+            # words to react to. A post that's just an external link (e.g. the
+            # CVE-2026-48710 blog) gives the LLM nothing to see, so it emits a
+            # meta-request instead of a comment. Skip those before they reach the model.
+            if len(re.sub(r'https?://\S+', '', raw_body).split()) < 20:
                 state[f"seen_{pid}"] = True
                 continue
 
@@ -506,6 +545,12 @@ def comment_on_feed(cfg, state, hashes, total_karma):
                 f'{COMMENT_GUIDE}'
             )
             if not comment_text or len(comment_text) < 30:
+                state[f"seen_{pid}"] = True
+                continue
+            # Meta-response guard: never post LLM scaffolding / refusals / info-requests
+            # as a comment. Backstop to the SKIP instruction in COMMENT_GUIDE.
+            if _looks_like_meta(comment_text):
+                log.warning(f"meta/SKIP output suppressed (not posted) r/{sub_name} '{title[:45]}': {comment_text[:80]}")
                 state[f"seen_{pid}"] = True
                 continue
             if len(comment_text) > 400:
