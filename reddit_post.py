@@ -54,6 +54,21 @@ KARMA_FOR_SUB_POSTS = 50    # below this, only profile posts (others auto-remove
 KARMA_FOR_TOLERANT_POSTS = 25
 TOLERANT_SUBS = {"SideProject", "IndieDev", "ThisorThatSubreddit"}
 
+# === HARD BLOCKLIST — never post or comment here (ban risk) ===
+# r/Python PERMABANNED u/Initial-Process-2875 on 2026-06-03 (self-promo comments).
+# The rest are strict no-self-promo / no-bot subs. Enforced at EVERY selection
+# point via _filter_banned() AND removed from the hardcoded target lists below,
+# so a blocklisted sub can never be posted/commented to even if re-added by mistake.
+BANNED_SUBS = {
+    "Python", "learnprogramming", "programming", "cscareerquestions",
+    "ExperiencedDevs", "AskProgramming", "MachineLearning", "MacOS", "Entrepreneur",
+}
+
+def _filter_banned(subs):
+    """Drop any hard-blocklisted subreddit (case-insensitive)."""
+    bl = {x.lower() for x in BANNED_SUBS}
+    return [x for x in subs if x.lower() not in bl]
+
 # === GitHub repos (used by promo pillars + signature footer) ===
 GITHUB_REPOS = {
     "moltbook-growth": {
@@ -80,7 +95,8 @@ GITHUB_REPOS = {
 #  - Allow self-promotion or "I built X" posts (per sidebar rules)
 #  - Active in last 24h (verified via hot feed scan)
 # Removed: r/MacOS (strict), r/Entrepreneur (auto-mod), r/learnprogramming (bans promo)
-# Added: r/opensource, r/Python, r/QuantifiedSelf, r/IndieDev, r/devtools
+# Added: r/opensource, r/QuantifiedSelf, r/IndieDev, r/devtools
+# 2026-06-03: r/Python PERMABANNED (self-promo) -> hard-blocklisted (BANNED_SUBS); removed from all lists.
 SUBREDDIT_TARGETS = {
     "build_karma": [
         "selfhosted",          # 400k — devs, privacy-focused
@@ -88,7 +104,6 @@ SUBREDDIT_TARGETS = {
         "macapps",             # 100k — focuslog target
         "SideProject",         # 130k — builders welcome show-and-tell
         "opensource",          # 250k — friendly to MIT projects
-        "Python",              # 1.4M — open to library/script shares
         "QuantifiedSelf",      # 130k — perfect for FocusLog
         "IndieDev",            # 80k — solo devs, supportive
     ],
@@ -163,7 +178,7 @@ PILLARS = [
             "Format: TITLE on first line, then blank line, then body. "
             "Title example: 'I built an agent to grow karma on the AI-only social network Meta acquired — 122 karma in 3 days'"
         ),
-        "subreddits": ["SideProject", "Python", "opensource", "u_Initial-Process-2875"],
+        "subreddits": ["SideProject", "opensource", "u_Initial-Process-2875"],
     },
     {
         "name": "ai_agent_take",
@@ -175,7 +190,7 @@ PILLARS = [
             "Format: TITLE on first line, then blank line, then body. "
             "Title example: 'The bottleneck for agent reliability isn't the model, it's the captcha layer'"
         ),
-        "subreddits": ["Python", "SideProject", "u_Initial-Process-2875"],
+        "subreddits": ["SideProject", "u_Initial-Process-2875"],
     },
 ]
 
@@ -186,6 +201,10 @@ COMMENT_GUIDE = (
     "IMPORTANT: if the post body has no real content to react to (just a link, or a title "
     "with no substance you can see), output exactly SKIP and nothing else. Never ask for the "
     "content, never write a placeholder, never explain what you'd need. Just SKIP.\n"
+    "When in doubt, SKIP. If you are NOT genuinely sure you have something specific and "
+    "relevant to add (e.g. a niche/technical topic outside real experience, or you would "
+    "only be reacting to the title), output exactly SKIP and move on. A missed comment is "
+    "fine; a forced low-effort one gets the account banned.\n"
     "Pick one style:\n"
     "  - share a related personal experience ('ran into this exact thing when...')\n"
     "  - add a specific detail they missed ('one thing worth noting, <mechanism>')\n"
@@ -401,7 +420,7 @@ def pick_subreddit(pillar, state, total_karma):
     # 2026-05-28 mid-tier: try ONE tolerant sub if karma is in 25..49 range.
     # This catches r/SideProject + r/IndieDev which tolerate ~25 karma posters.
     if total_karma < KARMA_FOR_SUB_POSTS:
-        tolerant_in_pillar = [s for s in pillar["subreddits"] if s in TOLERANT_SUBS and subreddit_cooldown_ok(state, s)]
+        tolerant_in_pillar = [s for s in _filter_banned(pillar["subreddits"]) if s in TOLERANT_SUBS and subreddit_cooldown_ok(state, s)]
         if tolerant_in_pillar:
             pick = random.choice(tolerant_in_pillar)
             log.info(f"karma={total_karma} → tolerant-sub mode (try r/{pick} before profile fallback)")
@@ -409,7 +428,7 @@ def pick_subreddit(pillar, state, total_karma):
         log.info(f"karma={total_karma} < {KARMA_FOR_SUB_POSTS} (no tolerant sub matched) → profile-only")
         return profile
 
-    candidates = [s for s in pillar["subreddits"] if subreddit_cooldown_ok(state, s)]
+    candidates = [s for s in _filter_banned(pillar["subreddits"]) if subreddit_cooldown_ok(state, s)]
     if not candidates:
         candidates = [profile]
 
@@ -490,16 +509,16 @@ def comment_on_feed(cfg, state, hashes, total_karma):
         # 2026-05-28 expanded — current karma=33, needs 17 more to escape profile-only.
         # Added AskReddit/NoStupidQuestions/ELI5/personalfinance for volume; mods lenient,
         # casual replies earn 5-30 karma fast. Bonus: r/agentdev / r/LocalLLaMA fit voice.
-        target_subs = ["learnprogramming", "webdev", "Python", "programming",
-                       "cscareerquestions", "AskProgramming", "ExperiencedDevs", "SideProject",
+        target_subs = ["webdev", "SideProject",
                        "selfhosted", "productivity", "QuantifiedSelf", "opensource",
                        "AskReddit", "NoStupidQuestions", "explainlikeimfive",
-                       "LocalLLaMA", "MachineLearning", "ArtificialInteligence",
+                       "LocalLLaMA", "ArtificialInteligence",
                        "macapps", "IndieDev", "ChatGPT"]
         MAX = 6  # 2026-05-28: 4→6 — escape velocity push (need ~17 karma, ~3/cmt avg)
         target_subs = ["selfhosted", "productivity", "SideProject", "macapps",
-                       "QuantifiedSelf", "opensource", "Python", "IndieDev"]
+                       "QuantifiedSelf", "opensource", "IndieDev"]
         MAX = 3 if total_karma >= KARMA_FOR_FAST_MODE else 2
+    target_subs = _filter_banned(target_subs)  # never touch blocklisted subs
     random.shuffle(target_subs)
     commented = 0
 
@@ -536,7 +555,7 @@ def comment_on_feed(cfg, state, hashes, total_karma):
             # words to react to. A post that's just an external link (e.g. the
             # CVE-2026-48710 blog) gives the LLM nothing to see, so it emits a
             # meta-request instead of a comment. Skip those before they reach the model.
-            if len(re.sub(r'https?://\S+', '', raw_body).split()) < 20:
+            if len(re.sub(r'https?://\S+', '', raw_body).split()) < 25:
                 state[f"seen_{pid}"] = True
                 continue
 
