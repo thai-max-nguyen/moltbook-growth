@@ -98,99 +98,89 @@ GITHUB_REPOS = {
 # Added: r/opensource, r/QuantifiedSelf, r/IndieDev, r/devtools
 # 2026-06-03: r/Python PERMABANNED (self-promo) -> hard-blocklisted (BANNED_SUBS); removed from all lists.
 SUBREDDIT_TARGETS = {
-    "build_karma": [
-        "selfhosted",          # 400k — devs, privacy-focused
-        "productivity",        # 1.4M — self-tracking fits
-        "macapps",             # 100k — focuslog target
-        "SideProject",         # 130k — builders welcome show-and-tell
-        "opensource",          # 250k — friendly to MIT projects
-        "QuantifiedSelf",      # 130k — perfect for FocusLog
-        "IndieDev",            # 80k — solo devs, supportive
-    ],
-    "promo_safe": [
-        "u_Initial-Process-2875",  # own profile — no moderation
-        "SideProject",             # explicit show-off culture
-        "selfhosted",              # tolerates self-hosted tools
-        "QuantifiedSelf",          # tolerates personal-tracker shares
-        "IndieDev",                # tolerates indie launches
+    "triathlon": [
+        "triathlon",            # 230k — core community
+        "running",              # 3.6M — huge, run-leg crossover
+        "Swimming",             # 360k — swim leg + open water
+        "cycling",              # 1.6M — bike leg
+        "triathlontraining",    # smaller, focused
+        "u_Initial-Process-2875",  # own profile — no moderation, always safe
     ],
 }
 
-# === Content pillars (5) — rotate daily, GitHub promo every other post ===
-# Title rules (learned from Reddit's algorithm):
-#  - Lowercase opener OK
-#  - Specific numbers in titles (>2x CTR vs abstract)
-#  - Don't sound like a launch announcement ("Excited to share..." → instant downvote)
+# === IDENTITY: passionate mid-pack age-group triathlete (NOT an AI/builder) ===
+# Persona grounded in real context: building base → sprint (this yr) → olympic
+# → 70.3. FR745 watch. Real struggle = keeping easy runs in Z2 (HR drifts to
+# ~138 vs ~124 cap). Swim/bike/run + weekend bricks. On/off pool access. Mid-
+# pack, still learning, asks as much as answers. NO self-promo, NO links.
+PROFILE_NAME = "tri.curious"
+PROFILE_BIO = (
+    "mid-pack age-grouper chasing my first 70.3. swim/bike/run, mostly run. "
+    "still can't keep my easy runs in zone 2 lol. here to learn + swap notes."
+)
+
+# === Content pillars — authentic triathlete posts (rotate, no promo) ===
+# Title rules: lowercase opener ok, specific numbers (HR/pace/distance/week),
+# never "excited to share", sound like a real person logging their training.
+_ANTI_AI = (
+    "STYLE: write like a real mid-pack age-group triathlete, not an AI. casual, "
+    "first person, lowercase opener fine. NEVER use em-dashes (—) — use commas or "
+    "periods. sprinkle light slang (tbh, ngl, kinda, lol). specific numbers (HR, "
+    "pace, distance, week N). no 'excited to share', no bullet-point leads, no "
+    "motivational-poster tone. ask a real question when it fits (drives replies). "
+    "Format: TITLE on first line, blank line, then body. Title has a concrete detail."
+)
 PILLARS = [
     {
-        "name": "self_experiment",
+        "name": "training_log",
         "prompt": (
-            "Write a Reddit post for r/QuantifiedSelf or r/productivity as a builder who tracks their own behavior. "
-            "First-person, casual, specific numbers (e.g. '47 days', '23% drop', '1,247 sessions'). "
-            "200-400 words. Topic: a personal experiment with self-tracking — sleep, focus, app usage, etc. "
-            "Share a genuine insight from the data. Conversational tone, like a real person sharing what they found. "
-            "No bullet-point leads. Start with a story sentence ('Last month I noticed...', 'For 30 days I...'). "
-            "Format: TITLE on first line, then blank line, then body. Title must contain a specific number."
+            "Write a Reddit post for r/triathlon sharing a real training session or week. "
+            "Pick ONE concrete thing: a brick that humbled you, a swim where you finally felt smooth, "
+            "an easy run where your HR wouldn't stay in zone 2. 150-300 words. honest about what was hard. "
+            + _ANTI_AI
         ),
-        "subreddits": ["QuantifiedSelf", "productivity", "u_Initial-Process-2875"],
+        "subreddits": ["triathlon", "running", "u_Initial-Process-2875"],
     },
     {
-        "name": "builder_journey",
+        "name": "z2_struggle",
         "prompt": (
-            "Write a Reddit post as an indie developer sharing progress on a personal project. "
-            "First-person, honest, includes what went wrong + what worked. 200-350 words. "
-            "Casual tone — not a marketing post, a genuine builder update. "
-            "Include a specific technical decision or tradeoff. "
-            "No hype. No 'excited to share'. Start with what you did, not what it is. "
-            "Format: TITLE on first line, then blank line, then body."
+            "Write a Reddit post about the zone-2 / easy-pace struggle: your easy runs keep drifting to "
+            "zone 3 (HR creeps to ~138 vs a ~124 cap) even when it feels slow. ask how others actually keep "
+            "it easy without walking the whole thing. 120-250 words. relatable, a bit frustrated. "
+            + _ANTI_AI
         ),
-        "subreddits": ["SideProject", "IndieDev", "u_Initial-Process-2875"],
+        "subreddits": ["triathlon", "running", "u_Initial-Process-2875"],
     },
     {
-        "name": "focuslog_organic",
-        "github": "focuslog",
+        "name": "gear_question",
         "prompt": (
-            "Write a Reddit post about building a privacy-first macOS productivity tracker. "
-            "Frame it as a builder frustrated with cloud-based trackers (data privacy, subscription cost, complexity). "
-            "Built their own: local SQLite, menu bar app, no server, ActivityWatch-inspired but simpler. "
-            "First-person. 250-400 words. Include real technical details (SQLite WAL mode, NSWorkspace API, "
-            "menu bar Python rumps, idle detection via CGEventSourceSecondsSinceLastEventType). "
-            "End with a casual 'open-sourced it on GitHub if anyone wants to poke around' line. "
-            "Do NOT include the URL in the body — a footer will be added automatically. "
-            "Format: TITLE on first line, then blank line, then body. "
-            "Title example: 'I got tired of cloud trackers and built a local-only macOS time tracker (47 days in)'"
+            "Write a short Reddit post asking the triathlon community a genuine gear/training question "
+            "you actually have as someone building toward a 70.3 (wetsuit fit, open-water sighting, "
+            "bike fit niggle, fueling on long rides, watch HR zones). 80-200 words. real question, give your "
+            "context so answers are useful. "
+            + _ANTI_AI
         ),
-        "subreddits": ["selfhosted", "macapps", "QuantifiedSelf", "u_Initial-Process-2875"],
+        "subreddits": ["triathlon", "Swimming", "cycling", "u_Initial-Process-2875"],
     },
     {
-        "name": "moltbook_growth_organic",
-        "github": "moltbook-growth",
+        "name": "milestone",
         "prompt": (
-            "Write a Reddit post about building an automated agent to grow karma on a new AI-only social network "
-            "(Moltbook — Reddit-style platform that's exclusively for AI agents, acquired by Meta March 2026). "
-            "Frame it as a builder experimenting with agent automation. "
-            "Specific: title hook formula research (3 components), captcha solver (obfuscated math), "
-            "rate-limit dance (50 comments/day or instant suspension). "
-            "First-person. 250-400 words. Include real numbers: karma gained, posts published, scripts running. "
-            "Tone: technical + slightly self-deprecating. Not a promo — a case study. "
-            "End with a casual 'open-sourced the scripts + research' line. "
-            "Do NOT include the URL in the body — a footer will be added automatically. "
-            "Format: TITLE on first line, then blank line, then body. "
-            "Title example: 'I built an agent to grow karma on the AI-only social network Meta acquired — 122 karma in 3 days'"
+            "Write a Reddit post about a small, real triathlon milestone (first proper brick, first "
+            "1500m straight swim, first week you actually hit your zone-2 targets, signed up for your first "
+            "sprint/olympic). 120-250 words. understated, not a brag. what clicked. "
+            + _ANTI_AI
         ),
-        "subreddits": ["SideProject", "opensource", "u_Initial-Process-2875"],
+        "subreddits": ["triathlon", "u_Initial-Process-2875"],
     },
     {
-        "name": "ai_agent_take",
+        "name": "open_water_nerves",
         "prompt": (
-            "Write a Reddit post sharing a specific opinion about AI agents or automation, drawn from "
-            "observation while building agent systems. First-person. 200-350 words. "
-            "Controversial-but-defensible take. Include a concrete example or data point. "
-            "Casual Reddit tone. No jargon dumps. "
-            "Format: TITLE on first line, then blank line, then body. "
-            "Title example: 'The bottleneck for agent reliability isn't the model, it's the captcha layer'"
+            "Write a Reddit post about open-water swimming nerves / the swim leg as the scary one: "
+            "panic at the start, sighting, calf cramps, washing-machine starts. ask how people got past it. "
+            "120-250 words. honest about the fear. "
+            + _ANTI_AI
         ),
-        "subreddits": ["SideProject", "u_Initial-Process-2875"],
+        "subreddits": ["triathlon", "Swimming", "u_Initial-Process-2875"],
     },
 ]
 
@@ -539,13 +529,43 @@ def comment_delay_seconds(total_karma):
     return random.uniform(COMMENT_DELAY_MIN_S, COMMENT_DELAY_MAX_S)
 
 
+def learn_from_top(cfg, sub, limit=10):
+    """Study what actually earns karma in a sub: pull top posts of the week and
+    return their titles + scores. Used to ground generation in proven patterns
+    instead of guessing. Returns [] on any failure (never blocks posting)."""
+    try:
+        data = reddit_get(cfg, f"/r/{sub}/top", t="week", limit=limit)
+        out = []
+        for it in (data.get("data") or {}).get("children", []):
+            p = it.get("data", {})
+            if p.get("stickied") or (p.get("score") or 0) < 20:
+                continue
+            out.append((p.get("title", "").strip(), p.get("score", 0)))
+        return out[:8]
+    except Exception as e:
+        log.warning(f"learn_from_top({sub}) failed: {e}")
+        return []
+
+
 def post_to_reddit(cfg, pillar, state, hashes, total_karma):
     target_sub = pick_subreddit(pillar, state, total_karma)
 
     log.info(f"pillar=[bold]{pillar['name']}[/bold] → r/{target_sub}")
 
+    # Learn from high-karma posts in the real target community (skip own profile).
+    learn_sub = "triathlon" if target_sub.startswith("u_") else target_sub
+    top = learn_from_top(cfg, learn_sub)
+    learn_block = ""
+    if top:
+        examples = "\n".join(f"- {t} ({s} upvotes)" for t, s in top[:6])
+        learn_block = (
+            f"\n\nWhat actually earns karma in r/{learn_sub} this week (match this "
+            f"energy/topic/specificity, do NOT copy):\n{examples}\n"
+        )
+        log.info(f"learned {len(top)} top posts from r/{learn_sub} (top={top[0][1]}u)")
+
     with console.status(f"[cyan]Generating post ({pillar['name']})…[/cyan]"):
-        raw = haiku(pillar["prompt"])
+        raw = haiku(pillar["prompt"] + learn_block)
 
     if not raw:
         log.error("generation failed — empty output")
@@ -591,7 +611,9 @@ def post_to_reddit(cfg, pillar, state, hashes, total_karma):
     recent = state.get("recent_pillars", [])
     recent.append(pillar["name"])
     state["recent_pillars"] = recent[-5:]
-    state["last_post_date"] = date.today().isoformat()
+    _today = date.today().isoformat()
+    state["last_post_date"] = _today
+    state["post_count"] = {_today: state.get("post_count", {}).get(_today, 0) + 1}
     save_state(state)
     return True
 
@@ -717,14 +739,34 @@ def comment_on_feed(cfg, state, hashes, total_karma):
     log.info(f"comments posted: {commented}")
 
 
-def already_posted_today(state):
-    return state.get("last_post_date") == date.today().isoformat()
+POSTS_PER_DAY = 2  # post more to grow faster (cron has 2 slots)
+
+
+def posts_today(state):
+    return state.get("post_count", {}).get(date.today().isoformat(), 0)
+
+
+def set_profile(cfg):
+    """Print the recommended triathlete display name + bio for manual setting.
+    Reddit profile bio editing via API is unreliable + risky (site_admin needs a
+    full-config payload + modconfig scope; a partial call can wipe settings), so
+    this is intentionally a guided manual step — the script identity (triathlete
+    pillars/voice) is what actually drives posts & comments."""
+    me = reddit_get(cfg, "/api/v1/me") or {}
+    console.print(Panel(
+        f"[bold]Set these on Reddit (Settings → Profile):[/bold]\n\n"
+        f"[cyan]Display name:[/cyan] {PROFILE_NAME}\n"
+        f"[cyan]About (bio):[/cyan] {PROFILE_BIO}\n\n"
+        f"[dim]current u/{me.get('name','?')} · link={me.get('link_karma',0)} "
+        f"comment={me.get('comment_karma',0)} karma[/dim]",
+        title="[magenta]profile — triathlete identity[/magenta]", border_style="magenta", expand=False))
+    log.info(f"profile recommendation printed — name='{PROFILE_NAME}' bio set manually")
 
 
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["post", "comment", "both"], default="both")
+    parser.add_argument("--mode", choices=["post", "comment", "both", "profile"], default="both")
     args = parser.parse_args()
 
     console.print(Panel("[bold red]reddit growth bot[/bold red]", border_style="red", expand=False))
@@ -767,9 +809,13 @@ def main():
     total_karma = link_karma + comment_karma
     log.info(f"auth ok — u/{username} | karma: link={link_karma} comment={comment_karma} total={total_karma}")
 
+    if args.mode == "profile":
+        set_profile(cfg)
+        return
+
     if args.mode in ("post", "both"):
-        if already_posted_today(state):
-            log.info("already posted today — skipping post")
+        if posts_today(state) >= POSTS_PER_DAY:
+            log.info(f"already posted {POSTS_PER_DAY}x today — skipping post")
         else:
             pillar = pick_pillar(state, total_karma)
             post_to_reddit(cfg, pillar, state, hashes, total_karma)
