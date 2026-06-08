@@ -792,7 +792,15 @@ def comment_on_feed(cfg, state, hashes, total_karma):
     log.info(f"comments posted: {commented}")
 
 
-POSTS_PER_DAY = 2  # post more to grow faster (cron has 2 slots)
+# POSTS_PER_DAY auto-tuned by reddit_growth_monitor.py (bounded 1-3) based on
+# whether posts actually earn karma (link_karma trend). Falls back to 2.
+def _load_posts_per_day():
+    try:
+        with open(os.path.join(DATA_DIR, "reddit_growth_config.json")) as f:
+            return max(1, min(3, int(json.load(f).get("posts_per_day", 2))))
+    except Exception:
+        return 2
+POSTS_PER_DAY = _load_posts_per_day()
 
 
 def posts_today(state):

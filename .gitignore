@@ -53,3 +53,6 @@ pillar_weights.json.bak_*
 *.bak_2*
 growth_config.json
 followed_agents.json
+reddit_growth_config.json
+reddit_stats.json
+reddit_learnings.md
