@@ -113,10 +113,11 @@ SUBREDDIT_TARGETS = {
 # → 70.3. FR745 watch. Real struggle = keeping easy runs in Z2 (HR drifts to
 # ~138 vs ~124 cap). Swim/bike/run + weekend bricks. On/off pool access. Mid-
 # pack, still learning, asks as much as answers. NO self-promo, NO links.
-PROFILE_NAME = "tri.curious"
+PROFILE_NAME = "Ironman dreams, 6hrs sleep"
 PROFILE_BIO = (
-    "mid-pack age-grouper chasing my first 70.3. swim/bike/run, mostly run. "
-    "still can't keep my easy runs in zone 2 lol. here to learn + swap notes."
+    "mid-pack age-grouper chasing my first 70.3 on not enough sleep. "
+    "swim/bike/run, mostly run. still can't keep easy runs in zone 2. "
+    "here to learn and swap notes."
 )
 
 # === Content pillars — authentic triathlete posts (rotate, no promo) ===
@@ -529,6 +530,37 @@ def comment_delay_seconds(total_karma):
     return random.uniform(COMMENT_DELAY_MIN_S, COMMENT_DELAY_MAX_S)
 
 
+_POST_AI_TELLS = (
+    "excited to share", "in conclusion", "furthermore", "moreover", "in today's",
+    "let's dive", "dive into", "key takeaway", "that being said", "at the end of the day",
+    "game changer", "game-changer", "i hope this helps", "without further ado",
+    "in summary", "to sum up", "needless to say", "as someone who", "delve",
+    "tapestry", "it's worth noting", "first and foremost", "look no further",
+    "embark on", "navigate the", "in the realm of", "a testament to",
+)
+
+
+def _post_looks_ai(title, body):
+    """STRICT gate before submitting a post — we have been banned for sounding
+    like AI. Reject on the hardest tells: any em/en-dash (#1 giveaway, and the
+    prompt forbids it), known AI phrases, or a numbered-list structure (AI loves
+    listicles). A rejected post is regenerated once, then skipped — never posted."""
+    raw = f"{title}\n{body}"
+    if "—" in raw or "–" in raw:
+        return "em-dash"
+    t = raw.lower()
+    for p in _POST_AI_TELLS:
+        if p in t:
+            return f"phrase:{p}"
+    if len(re.findall(r"^\s*\d+[.)]\s", body, re.M)) >= 3:
+        return "listicle"
+    # title in Headline Title Case (most words capitalised) = AI/marketing tell
+    words = [w for w in re.findall(r"[A-Za-z']+", title) if len(w) > 3]
+    if words and sum(1 for w in words if w[0].isupper()) / len(words) > 0.7:
+        return "title-case"
+    return None
+
+
 def learn_from_top(cfg, sub, limit=10):
     """Study what actually earns karma in a sub: pull top posts of the week and
     return their titles + scores. Used to ground generation in proven patterns
@@ -580,6 +612,27 @@ def post_to_reddit(cfg, pillar, state, hashes, total_karma):
         return False
 
     title = re.sub(r"^(title|TITLE)[:\s]+", "", title).strip()
+
+    # STRICT anti-AI gate — we have been banned for sounding like AI. Regenerate
+    # once if the post trips a hard tell, then SKIP rather than post it.
+    ai = _post_looks_ai(title, body)
+    if ai:
+        log.warning(f"post looks AI ({ai}) — regenerating once")
+        raw2 = haiku(
+            pillar["prompt"] + learn_block +
+            f"\n\nYour previous attempt sounded like AI (reason: {ai}). Rewrite it the way a "
+            "tired age-grouper actually types a reddit post: lowercase opener, NO em-dashes or "
+            "en-dashes, no 'excited to share', no numbered lists, specific numbers, end with a "
+            "real question. Format: TITLE on line 1, blank line, then body."
+        )
+        if raw2:
+            ls = raw2.strip().split("\n")
+            title = re.sub(r"^(title|TITLE)[:\s]+", "", ls[0].strip().strip('"').strip("'")).strip()
+            body = "\n".join(ls[2:]).strip() if len(ls) > 2 else "\n".join(ls[1:]).strip()
+        ai2 = _post_looks_ai(title, body)
+        if ai2 or not title or not body:
+            log.error(f"post STILL looks AI after regen ({ai2}) — SKIP to avoid ban")
+            return False
 
     if pillar.get("github"):
         body = append_github_footer(body, pillar["github"])
@@ -747,20 +800,49 @@ def posts_today(state):
 
 
 def set_profile(cfg):
-    """Print the recommended triathlete display name + bio for manual setting.
-    Reddit profile bio editing via API is unreliable + risky (site_admin needs a
-    full-config payload + modconfig scope; a partial call can wipe settings), so
-    this is intentionally a guided manual step — the script identity (triathlete
-    pillars/voice) is what actually drives posts & comments."""
+    """Set the profile display name (title) + bio (public_description) via the
+    API, PRESERVING all other profile-subreddit settings (read from about/edit
+    first, then write back via site_admin). Verified working 2026-06-08."""
     me = reddit_get(cfg, "/api/v1/me") or {}
-    console.print(Panel(
-        f"[bold]Set these on Reddit (Settings → Profile):[/bold]\n\n"
-        f"[cyan]Display name:[/cyan] {PROFILE_NAME}\n"
-        f"[cyan]About (bio):[/cyan] {PROFILE_BIO}\n\n"
-        f"[dim]current u/{me.get('name','?')} · link={me.get('link_karma',0)} "
-        f"comment={me.get('comment_karma',0)} karma[/dim]",
-        title="[magenta]profile — triathlete identity[/magenta]", border_style="magenta", expand=False))
-    log.info(f"profile recommendation printed — name='{PROFILE_NAME}' bio set manually")
+    prof = f"u_{me.get('name')}"
+    d = (reddit_get(cfg, f"/r/{prof}/about/edit") or {}).get("data", {})
+    if not d.get("subreddit_id"):
+        log.error("could not read profile settings — abort (no blind write)")
+        return False
+    b = lambda x: "true" if x else "false"
+    payload = {
+        "sr": d.get("subreddit_id"), "name": prof,
+        "title": PROFILE_NAME, "public_description": PROFILE_BIO,
+        "description": d.get("description", ""), "type": d.get("subreddit_type", "user"),
+        "link_type": d.get("content_options", "any"), "lang": d.get("language", "en"),
+        "wikimode": d.get("wikimode", "disabled"),
+        "spam_comments": d.get("spam_comments", "low"), "spam_links": d.get("spam_links", "low"),
+        "spam_selfposts": d.get("spam_selfposts", "low"),
+        "comment_score_hide_mins": d.get("comment_score_hide_mins", "0"),
+        "wiki_edit_age": d.get("wiki_edit_age", "0"), "wiki_edit_karma": d.get("wiki_edit_karma", "100"),
+        "over_18": b(d.get("over_18")), "allow_top": "true",
+        "show_media": b(d.get("show_media")), "show_media_preview": b(d.get("show_media_preview")),
+        "allow_images": b(d.get("allow_images")), "allow_videos": b(d.get("allow_videos")),
+        "allow_galleries": b(d.get("allow_galleries")), "allow_polls": b(d.get("allow_polls")),
+        "allow_post_crossposts": b(d.get("allow_post_crossposts")),
+        "allow_discovery": b(d.get("allow_discovery")), "accept_followers": b(d.get("accept_followers")),
+        "collapse_deleted_comments": b(d.get("collapse_deleted_comments")),
+        "exclude_banned_modqueue": b(d.get("exclude_banned_modqueue")),
+        "free_form_reports": b(d.get("free_form_reports")),
+        "original_content_tag_enabled": b(d.get("original_content_tag_enabled")),
+        "restrict_commenting": b(d.get("restrict_commenting")),
+        "restrict_posting": b(d.get("restrict_posting")),
+        "spoilers_enabled": b(d.get("spoilers_enabled")),
+        "suggested_comment_sort": d.get("suggested_comment_sort", "qa"),
+        "key_color": d.get("key_color", ""), "api_type": "json",
+    }
+    res = reddit_post(cfg, "/api/site_admin", payload)
+    errs = (res.get("json") or {}).get("errors", []) if isinstance(res, dict) else ["?"]
+    if errs:
+        log.error(f"profile set failed: {errs}")
+        return False
+    log.info(f"[green]✓ profile set[/green] name='{PROFILE_NAME}'")
+    return True
 
 
 def main():
