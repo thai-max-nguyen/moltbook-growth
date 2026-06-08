@@ -675,18 +675,20 @@ def comment_on_feed(cfg, state, hashes, total_karma):
     """Leave 2-4 genuine comments on relevant posts to build karma.
     Below karma threshold, prioritize high-volume subs to escape profile-only mode faster."""
     if total_karma < KARMA_FOR_SUB_POSTS:
-        # Karma push: high-traffic subs that allow non-promo comments + reward useful replies fast.
-        # 2026-05-28 expanded — current karma=33, needs 17 more to escape profile-only.
-        # Added AskReddit/NoStupidQuestions/ELI5/personalfinance for volume; mods lenient,
-        # casual replies earn 5-30 karma fast. Bonus: r/agentdev / r/LocalLLaMA fit voice.
-        target_subs = ["webdev", "SideProject",
-                       "selfhosted", "productivity", "QuantifiedSelf", "opensource",
-                       "AskReddit", "NoStupidQuestions", "explainlikeimfive",
-                       "LocalLLaMA", "ArtificialInteligence",
-                       "macapps", "IndieDev", "ChatGPT"]
-        MAX = 6  # 2026-05-28: 4→6 — escape velocity push (need ~17 karma, ~3/cmt avg)
-        target_subs = ["selfhosted", "productivity", "SideProject", "macapps",
-                       "QuantifiedSelf", "opensource", "IndieDev"]
+        # GATED (<50 karma): high-volume escape push. Comments are the only way
+        # out of profile-only mode (posts in real subs get auto-removed).
+        # 2026-06-08 FIX: previously MAX=6 here was immediately overwritten to 2
+        # by a stray block missing its `else:` — the bot was under-commenting
+        # (effective 2/run, not 6), starving the escape. Now `else`-branched +
+        # the cap is monitor-tuned via reddit_growth_config.json.
+        target_subs = ["AskReddit", "NoStupidQuestions", "explainlikeimfive",
+                       "running", "Swimming", "cycling", "productivity",
+                       "selfhosted", "QuantifiedSelf"]
+        MAX = _load_max_comments()  # config-tuned, default 6, bounded 3-10
+    else:
+        # UNGATED (>=50): can post to real subs; comment more selectively.
+        target_subs = ["running", "Swimming", "cycling", "productivity",
+                       "selfhosted", "QuantifiedSelf"]
         MAX = 3 if total_karma >= KARMA_FOR_FAST_MODE else 2
     target_subs = _filter_banned(target_subs)  # never touch blocklisted subs
     random.shuffle(target_subs)
@@ -792,14 +794,20 @@ def comment_on_feed(cfg, state, hashes, total_karma):
     log.info(f"comments posted: {commented}")
 
 
-# POSTS_PER_DAY auto-tuned by reddit_growth_monitor.py (bounded 1-3) based on
-# whether posts actually earn karma (link_karma trend). Falls back to 2.
-def _load_posts_per_day():
+# POSTS_PER_DAY + comment cap auto-tuned by reddit_growth_monitor.py via
+# reddit_growth_config.json (posts by link_karma trend, comments by
+# comment_karma trend). Sensible fallbacks if config missing.
+def _growth_cfg():
     try:
         with open(os.path.join(DATA_DIR, "reddit_growth_config.json")) as f:
-            return max(1, min(3, int(json.load(f).get("posts_per_day", 2))))
+            return json.load(f)
     except Exception:
-        return 2
+        return {}
+def _load_posts_per_day():
+    return max(1, min(4, int(_growth_cfg().get("posts_per_day", 3))))
+def _load_max_comments():
+    # gated-phase comment cap (the karma-escape lever); bounded 3-10
+    return max(3, min(10, int(_growth_cfg().get("max_comments", 6))))
 POSTS_PER_DAY = _load_posts_per_day()
 
 

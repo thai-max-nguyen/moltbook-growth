@@ -123,34 +123,47 @@ def main():
         f"per-day 7d: total={td7} link(posts)={ld7} comment={cd7}")
 
     cfg = load_config()
-    ppd = max(1, min(3, int(cfg.get("posts_per_day", POSTS_PER_DAY_DEFAULT))))
-    verdict, action = "monitoring", None
+    ppd = max(1, min(4, int(cfg.get("posts_per_day", POSTS_PER_DAY_DEFAULT))))
+    mc = max(3, min(10, int(cfg.get("max_comments", 6))))
+    actions = []
 
+    # ── COMMENT cap tune (the escape lever, esp. while gated) — key off
+    #    comment_karma/day. Landing → push higher; flat/removed → back off.
+    if cd7 is not None:
+        if cd7 >= 8 and mc < 10:
+            mc += 1; actions.append(f"max_comments → {mc} (comments landing, push escape)")
+        elif cd7 < 3 and mc > 3:
+            mc -= 1; actions.append(f"max_comments → {mc} (comments not converting — removed/downvoted/too-AI?)")
+
+    # ── POST cap tune — gate-aware. While gated, posts mostly hit the no-mod
+    #    profile sub (safe but low reach); keep modest. Ungated → scale by link.
     if live["total_karma"] < KARMA_GATE:
-        verdict = (f"profile-GATED: total karma {live['total_karma']} < {KARMA_GATE} — posts in real subs "
-                   f"auto-removed; comment karma is the way out. keep commenting + profile posts")
+        verdict = (f"profile-GATED: total karma {live['total_karma']} < {KARMA_GATE} — real-sub posts "
+                   f"auto-removed; COMMENTS are the way out (max_comments={mc})")
     elif ld7 is not None:
         if ld7 <= 0 and ppd > 1:
-            ppd -= 1
-            verdict = f"posts NOT landing (link_karma/day {ld7}) — removed/downvoted/too-AI?"
-            action = f"posts_per_day → {ppd} (post less, investigate)"
-        elif ld7 >= 2.0 and ppd < 3:
-            ppd += 1
+            ppd -= 1; actions.append(f"posts_per_day → {ppd} (posts not landing, investigate)")
+            verdict = f"posts NOT landing (link_karma/day {ld7})"
+        elif ld7 >= 2.0 and ppd < 4:
+            ppd += 1; actions.append(f"posts_per_day → {ppd} (lean in)")
             verdict = f"posts landing well (link_karma/day {ld7})"
-            action = f"posts_per_day → {ppd} (lean in)"
         else:
-            verdict = f"steady (link_karma/day {ld7}, total/day {td7})"
+            verdict = f"steady (link/day {ld7}, comment/day {cd7})"
+    else:
+        verdict = f"steady (comment/day {cd7})"
 
     cfg["posts_per_day"] = ppd
+    cfg["max_comments"] = mc
     cfg["_updated"] = now_iso
     cfg["_verdict"] = verdict
     json.dump(cfg, open(CONFIG_FILE, "w"), indent=2)
+    action = "; ".join(actions) if actions else None
     log(f"experiment: {verdict}" + (f" · {action}" if action else ""))
 
     stats["snapshots"] = snaps[-200:]
     stats["growth_rate_latest"] = {"ts": now_iso, "total_karma_per_day_7d": td7,
                                    "link_karma_per_day_7d": ld7, "comment_karma_per_day_7d": cd7,
-                                   "verdict": verdict, "posts_per_day": ppd}
+                                   "verdict": verdict, "posts_per_day": ppd, "max_comments": mc}
     json.dump(stats, open(STATS_FILE, "w"), indent=2)
     try:
         with open(LEARNINGS_FILE, "a") as f:
