@@ -220,6 +220,36 @@ COMMENT_GUIDE = (
     "Sound like a dev/builder who actually does this stuff. Output ONLY the comment text, or SKIP."
 )
 
+# ── r/triathlon GENUINE participation (2026-06-08) ────────────────────────
+# Max is a real age-group triathlete. This is NOT growth/self-promo — it's
+# authentic community participation, which is the SAFEST kind (real domain
+# experience = specific replies = ban-resistant). NEVER attach the GitHub
+# footer or any link to these. Comment-only; do not post self-promo here.
+TRIATHLON_SUBS = ("triathlon", "Triathlon_Training", "Swimming", "running", "cycling")
+
+# Persona grounded in Max's actual training so replies are concrete, never
+# generic. Keep it honest: age-grouper, mid-pack, still building. Do NOT
+# invent race results or claim expertise (coaches/pros will spot a fake).
+TRIATHLETE_GUIDE = (
+    "You are a real age-group triathlete replying on reddit. Casual first-person, "
+    "like texting a training buddy. 1-3 sentences, 80-260 chars.\n"
+    "Your real context (use ONLY what fits the post, never dump it all):\n"
+    "  - building toward 70.3, currently base phase: sprint this year, olympic mid-year, 70.3 later.\n"
+    "  - train swim/bike/run + brick sessions on weekends. garmin watch (FR745) for HR zones.\n"
+    "  - your real struggle: keeping easy runs in Z2, they drift to Z3 (HR creeps to ~138 vs ~124 cap). bulking right now so run feels heavy.\n"
+    "  - pool access has been on and off lately so some weeks are run/strength heavy.\n"
+    "  - mid-pack age-grouper, not fast, still learning. you ask as much as you answer.\n"
+    "RULES:\n"
+    "  - react to THEIR specific situation: their distance, their HR, their race, their gear, their injury. name it.\n"
+    "  - share ONE concrete thing from your own training when relevant (a number, a session, a mistake you made). never a generic pep talk.\n"
+    "  - if the post needs expertise you don't have (advanced bike fit, coaching plans, medical advice, fast-AG race tactics), output exactly SKIP. a fake expert reply gets you banned.\n"
+    "  - if you'd only be saying 'nice job' or 'good luck' with nothing specific, output exactly SKIP.\n"
+    "  - NEVER em-dashes. start most sentences lowercase. contractions, fragments fine. slang ok (tbh, ngl, imo, kinda, fwiw).\n"
+    "  - no 'as someone who', no 'great post', no 'happy training', no pep-talk filler, no AI tells.\n"
+    "  - no links, no self-promo, ever.\n"
+    "Output ONLY the comment text, or SKIP."
+)
+
 
 # Meta-response guard (2026-06-02): the LLM sometimes punts instead of writing a
 # comment, asking for the linked content, refusing, or leaking its own scaffolding
@@ -245,6 +275,71 @@ def _looks_like_meta(text):
     if t == "skip" or t.startswith("skip ") or t.startswith("skip.") or t.startswith("skip\n"):
         return True
     return any(p in t for p in _META_PHRASES)
+
+
+# ── Anti-AI-detection layer (2026-06-08) ──────────────────────────────────
+# r/triathlon (and most communities) ban accounts pattern-matched as bots.
+# Two failure modes beyond the meta-leak: (1) AI-tell phrasing, (2) generic
+# low-effort replies that add nothing. Both are caught here, post-generation.
+
+# Phrases that almost never appear in genuine casual reddit but are LLM
+# signatures. Any hit → reject the comment (don't post).
+_AI_TELLS = (
+    "as someone who", "as an avid", "great question", "great post", "great write-up",
+    "thanks for sharing", "thank you for sharing", "well said", "spot on",
+    "couldn't agree more", "could not agree more", "kudos", "hats off",
+    "that said,", "at the end of the day", "it's worth noting", "its worth noting",
+    "worth noting that", "keep in mind", "needless to say", "rest assured",
+    "a testament to", "game-changer", "game changer", "delve", "tapestry",
+    "in today's", "in todays", "when it comes to", "navigate the", "navigating the",
+    "first and foremost", "in conclusion", "to summarize", "overall,",
+    "i hope this helps", "hope this helps", "happy training", "happy to help",
+    "you've got this", "youve got this", "keep up the great", "sending good vibes",
+    "what a journey", "the key takeaway", "key takeaways", "in essence",
+)
+
+# Generic praise / filler words. A comment built ONLY from these (no concrete
+# detail) is low-effort and ban-bait.
+_GENERIC_WORDS = (
+    "nice", "great", "awesome", "amazing", "congrats", "congratulations",
+    "good luck", "keep it up", "keep going", "well done", "good job", "love this",
+    "so cool", "impressive", "respect", "inspiring", "motivating", "solid",
+    "this is helpful", "very helpful", "good stuff", "good for you", "proud of you",
+)
+
+
+def _looks_ai_generic(text):
+    """True if the comment reads as AI-generated or generic low-effort.
+    Specificity is the #1 ban defense: a real reply names a number, a body
+    part, a workout, a piece of gear, a feeling — something concrete. A reply
+    with none of that, built from praise words, is rejected."""
+    t = (text or "").strip().lower()
+    if not t:
+        return True
+    if any(p in t for p in _AI_TELLS):
+        return True
+    # Specificity signal: a digit (pace/HR/distance/time/week) OR a domain noun.
+    has_number = bool(re.search(r"\d", t))
+    _SPECIFIC = (
+        "z2", "zone", "hr", "heart rate", "bpm", "ftp", "watt", "pace", "split",
+        "brick", "taper", "interval", "tempo", "threshold", "cadence", "rpe",
+        "swim", "bike", "ride", "run", "saddle", "wetsuit", "goggles", "garmin",
+        "wahoo", "transition", "t1", "t2", "open water", "pool", "drill", "kick",
+        "long run", "easy run", "recovery", "fueling", "gel", "carb", "cramp",
+        "calf", "knee", "hip", "shin", "achilles", "sprint", "olympic", "70.3",
+        "ironman", "5k", "10k", "half", "marathon", "vo2", "lactate", "elevation",
+    )
+    has_specific = any(w in t for w in _SPECIFIC)
+    # Strip generic phrases; if almost nothing meaningful is left AND there's no
+    # number/domain noun, it's filler.
+    stripped = t
+    for g in _GENERIC_WORDS:
+        stripped = stripped.replace(g, "")
+    stripped = re.sub(r"[^a-z]+", " ", stripped).strip()
+    too_thin = len(stripped.split()) < 6
+    if too_thin and not has_number and not has_specific:
+        return True
+    return False
 
 
 # ---------------- helpers ----------------
@@ -520,6 +615,13 @@ def comment_on_feed(cfg, state, hashes, total_karma):
         MAX = 3 if total_karma >= KARMA_FOR_FAST_MODE else 2
     target_subs = _filter_banned(target_subs)  # never touch blocklisted subs
     random.shuffle(target_subs)
+    # Genuine triathlete participation (2026-06-08): always give r/triathlon &
+    # friends first crack, regardless of karma. These are real-community comments,
+    # never self-promo. Bump MAX by 1 so growth engagement isn't starved.
+    tri = _filter_banned(list(TRIATHLON_SUBS))
+    random.shuffle(tri)
+    target_subs = tri + [s for s in target_subs if s not in tri]
+    MAX += 1
     commented = 0
 
     for sub_name in target_subs:
@@ -559,17 +661,26 @@ def comment_on_feed(cfg, state, hashes, total_karma):
                 state[f"seen_{pid}"] = True
                 continue
 
+            is_tri = sub_name in TRIATHLON_SUBS
+            guide = TRIATHLETE_GUIDE if is_tri else COMMENT_GUIDE
             comment_text = haiku(
                 f'Subreddit: r/{sub_name}\nPost title: "{title}"\nPost body: "{body}"\n\n'
-                f'{COMMENT_GUIDE}'
+                f'{guide}'
             )
             if not comment_text or len(comment_text) < 30:
                 state[f"seen_{pid}"] = True
                 continue
             # Meta-response guard: never post LLM scaffolding / refusals / info-requests
-            # as a comment. Backstop to the SKIP instruction in COMMENT_GUIDE.
+            # as a comment. Backstop to the SKIP instruction in the guide.
             if _looks_like_meta(comment_text):
                 log.warning(f"meta/SKIP output suppressed (not posted) r/{sub_name} '{title[:45]}': {comment_text[:80]}")
+                state[f"seen_{pid}"] = True
+                continue
+            # Anti-AI-detection guard (2026-06-08): reject AI-tell phrasing and
+            # generic low-effort filler before it ever reaches reddit. Specificity
+            # is the ban defense — see _looks_ai_generic.
+            if _looks_ai_generic(comment_text):
+                log.warning(f"AI/generic output suppressed (not posted) r/{sub_name} '{title[:45]}': {comment_text[:80]}")
                 state[f"seen_{pid}"] = True
                 continue
             if len(comment_text) > 400:

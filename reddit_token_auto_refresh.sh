@@ -171,9 +171,21 @@ else
       log "  ⚠ ${OPEN_HELPER} missing — falling back to legacy new-tab open"
       /usr/bin/open -ga "Google Chrome" "https://www.reddit.com/"
     fi
-    sleep 8
-    "${PY}" "${RECOVER}" >> "${LOG}" 2>&1 || true
-    if is_alive; then
+    # 2026-06-08: the old `sleep 8` + single recover was too short. reddit
+    # only mints a fresh token_v2 after its in-session bootstrap runs, and
+    # Chrome flushes the new cookie to the main DB a few seconds later. On a
+    # cold/windowless Chrome (helper returns "opened-new-window") the page
+    # needs ~15-20s to load + mint + flush. Wait longer, then poll recover a
+    # few times before giving up. Verified: in-session reload mints +24h JWT.
+    sleep 18
+    recovered=0
+    for attempt in 1 2 3; do
+      "${PY}" "${RECOVER}" >> "${LOG}" 2>&1 || true
+      if is_alive; then recovered=1; break; fi
+      log "  step 3 retry ${attempt}/3 — token not minted yet, waiting 6s"
+      sleep 6
+    done
+    if [ "${recovered}" = "1" ]; then
       log "✓ step 3 succeeded — token alive (Chrome minted fresh JWT)"
       exit 0
     fi
