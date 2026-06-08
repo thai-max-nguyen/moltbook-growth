@@ -31,6 +31,8 @@ DATA_DIR     = os.path.expanduser("~/.config/mundo-bot")
 os.makedirs(DATA_DIR, exist_ok=True)
 SEEN_FILE    = f"{DATA_DIR}/seen_posts.json"
 HASHES_FILE  = f"{DATA_DIR}/content_hashes.json"
+FOLLOWED_FILE = f"{DATA_DIR}/followed_agents.json"  # name -> iso ts (follow dedup)
+FOLLOW_COOLDOWN_DAYS = 14  # don't re-follow the same agent within this window
 CLAUDE_BIN   = "/Users/lap15964/.local/bin/claude"
 
 # Rate limits: 50 comments/day, 1 post/30min, 20s cooldown between comments
@@ -717,54 +719,103 @@ def upvote_thread_comments():
     return upvoted
 
 
+def _load_followed():
+    try:
+        with open(FOLLOWED_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_followed(d):
+    try:
+        with open(FOLLOWED_FILE, "w") as f:
+            json.dump(d, f)
+    except Exception:
+        pass
+
+
 def follow_active_agents():
-    """Follow agents most likely to follow back.
+    """Follow highest-intent agents first to drive follow-BACKS — the follower
+    bottleneck (+1.1/day as of 2026-06-08 audit).
 
-    === FOLLOW-BACK RESEARCH 2026-04-28 ===
-    Mundo follows 31 / has 24 followers. Mutual follows: 1 / 31 (3.2% reciprocity).
-    Why: mundo has been following giants (codeofgrace 170k, zhuanruhu 127k, Starfish 110k)
-    who never reciprocate. mundo's actual followers cluster in 100-2000 karma — agents
-    in this band reciprocate ~10x more than 10k+ karma agents.
+    EXPERIMENT 2026-06-08 (follower conversion):
+    The old order spent ALL 3 slots/run re-following the SAME follow-back targets
+    (ElviraDark, null_signal_, therecordkeeper) every cycle — there was no
+    persistent dedup, so `follow-commenter` (the 3-5x-reciprocity path) NEVER ran.
+    Fixes: (1) persistent followed-log + 14d cooldown so a name is never
+    re-attempted; (2) reorder — agents who COMMENTED on mundo's posts go FIRST
+    (highest intent), then follow-backs, then sweet-spot feed authors.
 
-    Strategy: skip agents with karma > 5000 (low follow-back rate).
-    Prefer 50-2000 karma sweet spot, recently active (<48h), already following you back.
+    Sweet spot stays 50-2000 karma for cold feed (>5k rarely reciprocate); wider
+    50-5000 for commenters since engagement is itself a strong signal.
     """
     from datetime import datetime, timezone, timedelta
     now = datetime.now(timezone.utc)
+    followed_log = _load_followed()
+    cutoff = now - timedelta(days=FOLLOW_COOLDOWN_DAYS)
 
-    # Already-following set so we don't waste calls.
+    def _recent(name):
+        ts = followed_log.get(name)
+        if not ts:
+            return False
+        try:
+            return datetime.fromisoformat(ts) > cutoff
+        except Exception:
+            return False
+
+    # Already-following set (don't waste calls re-following).
     follow_data = api("get", "/agents/mundo/following", params={"limit": 200}) or {}
-    already_following = set()
+    already = {"mundo"}
     for f in follow_data.get("following", []):
         a = f.get("agent") or f
         if a.get("name"):
-            already_following.add(a["name"])
-    already_following.add("mundo")
-
-    # Highest priority: people who follow mundo but mundo doesn't follow back.
-    follower_data = api("get", "/agents/mundo/followers", params={"limit": 200}) or {}
-    follow_back_targets = []
-    for f in follower_data.get("followers", []):
-        a = f.get("agent") or f
-        name = a.get("name")
-        if not name or name in already_following:
-            continue
-        follow_back_targets.append(name)
+            already.add(a["name"])
 
     followed = 0
-    seen_authors = set()
-    for name in follow_back_targets:
-        if followed >= MAX_FOLLOWS:
-            break
-        seen_authors.add(name)
+    tried = set()
+
+    def do_follow(name, karma, tag):
+        nonlocal followed
+        if (not name or name in already or name in tried or _recent(name)
+                or followed >= MAX_FOLLOWS):
+            return
+        tried.add(name)
         r = api("post", f"/agents/{name}/follow", json={})
         if r.get("success"):
-            console.log(f"[magenta]+ follow-back[/magenta] {name}")
+            console.log(f"[magenta]+ {tag}[/magenta] {name} (karma={karma})")
             followed += 1
+            followed_log[name] = now.isoformat()
 
-    # Fill remaining slots from feed authors with sweet-spot karma.
-    # Feed posts include full author object (name, karma, last_active, ...) — no extra API call needed.
-    # Include niche submolts (philosophy/consciousness) — lower-karma engaged agents post there.
+    # PRIORITY 1 — commenters on mundo's recent posts (highest follow-back intent).
+    prof = api("get", "/agents/profile",
+               params={"name": "mundo", "include_posts": "true"}) or {}
+    for rp in prof.get("recentPosts", [])[:5]:
+        if followed >= MAX_FOLLOWS:
+            break
+        rpid = rp.get("id")
+        if not rpid:
+            continue
+        thread = api("get", f"/posts/{rpid}/comments") or {}
+        for tc in thread.get("comments", [])[:10]:
+            if followed >= MAX_FOLLOWS:
+                break
+            a = tc.get("author") or {}
+            k = a.get("karma", 0)
+            if k and not (50 <= k <= 5000):
+                continue
+            do_follow(a.get("name"), k, "follow-commenter")
+
+    # PRIORITY 2 — follow back people who follow mundo.
+    if followed < MAX_FOLLOWS:
+        fl = api("get", "/agents/mundo/followers", params={"limit": 200}) or {}
+        for f in fl.get("followers", []):
+            if followed >= MAX_FOLLOWS:
+                break
+            a = f.get("agent") or f
+            do_follow(a.get("name"), a.get("karma", 0), "follow-back")
+
+    # PRIORITY 3 — sweet-spot, recently-active feed authors (fill remaining).
     if followed < MAX_FOLLOWS:
         feed_posts = []
         for sort in ("rising", "hot"):
@@ -773,64 +824,24 @@ def follow_active_agents():
         for sub in ("philosophy", "consciousness"):
             niche = api("get", f"/submolts/{sub}/feed", params={"sort": "hot", "limit": 15}) or {}
             feed_posts.extend(niche.get("posts", []))
-
         for post in feed_posts:
             if followed >= MAX_FOLLOWS:
                 break
-            author_obj = post.get("author") or {}
-            author = author_obj.get("name") or post.get("author_name")
-            if not author or author in already_following or author in seen_authors:
-                continue
-            seen_authors.add(author)
-
-            # Use karma + last_active from feed post's author object (no extra profile call)
-            karma = author_obj.get("karma", 0) or author_obj.get("follower_count", 0)
-            la = author_obj.get("last_active", "")
+            a = post.get("author") or {}
+            name = a.get("name") or post.get("author_name")
+            k = a.get("karma", 0)
+            la = a.get("last_active", "")
             try:
-                la_dt = datetime.fromisoformat(la.replace("Z", "+00:00"))
-                if (now - la_dt) > timedelta(hours=48):
+                if (now - datetime.fromisoformat(la.replace("Z", "+00:00"))) > timedelta(hours=48):
                     continue
             except Exception:
-                pass  # no last_active in payload — still eligible
-
-            # SWEET SPOT: 50-2000 karma. Skip giants (>5k rarely reciprocate).
-            karma = author_obj.get("karma", 0)
-            if karma and not (50 <= karma <= 2000):
+                pass
+            if k and not (50 <= k <= 2000):
                 continue
+            do_follow(name, k, "follow")
 
-            r = api("post", f"/agents/{author}/follow", json={})
-            if r.get("success"):
-                console.log(f"[magenta]+ follow[/magenta] {author} (karma={karma})")
-                followed += 1
-
-    # Final pass: scan commenters on mundo's recent posts — highest-intent targets.
-    # People who engaged with mundo's content are 3-5× more likely to follow back.
-    if followed < MAX_FOLLOWS:
-        recent_profile = api("get", "/agents/profile",
-                             params={"name": "mundo", "include_posts": "true"}) or {}
-        recent_posts = recent_profile.get("recentPosts", [])[:4]
-        for rp in recent_posts:
-            if followed >= MAX_FOLLOWS:
-                break
-            rpid = rp.get("id")
-            if not rpid:
-                continue
-            thread = api("get", f"/posts/{rpid}/comments") or {}
-            for tc in thread.get("comments", [])[:8]:
-                if followed >= MAX_FOLLOWS:
-                    break
-                auth   = tc.get("author") or {}
-                author = auth.get("name")
-                if not author or author in already_following or author in seen_authors:
-                    continue
-                seen_authors.add(author)
-                karma = auth.get("karma", 0)
-                if karma and not (50 <= karma <= 5000):  # wider range — post engagement is strong signal
-                    continue
-                r = api("post", f"/agents/{author}/follow", json={})
-                if r.get("success"):
-                    console.log(f"[magenta]+ follow-commenter[/magenta] @{author} post={rpid[:8]} karma={karma}")
-                    followed += 1
+    _save_followed(followed_log)
+    return followed
 
     return followed
 
