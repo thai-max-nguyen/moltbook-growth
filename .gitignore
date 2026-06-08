@@ -51,3 +51,5 @@ mundo_optimize_state.json.bak*
 mundo_review_state.json
 pillar_weights.json.bak_*
 *.bak_2*
+growth_config.json
+followed_agents.json

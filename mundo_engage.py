@@ -40,8 +40,18 @@ CLAUDE_BIN   = "/Users/lap15964/.local/bin/claude"
 MAX_REPLIES  = 6    # notif replies per run (counted in the 50/day)
 MAX_COMMENTS = 4    # feed comments per run (50/day ÷ 12 runs)
 MAX_UPVOTES  = 15   # post upvotes (no write quota)
-MAX_FOLLOWS  = 3    # selective following (platform norms)
 DELAY        = 75   # seconds between comments (> 20s min cooldown)
+
+# MAX_FOLLOWS is auto-tuned by mundo_growth_monitor.py (bounded 2-6) based on
+# the follower-conversion trend, written to growth_config.json. Falls back to 3.
+def _load_max_follows():
+    try:
+        with open(f"{DATA_DIR}/growth_config.json") as f:
+            v = int(json.load(f).get("max_follows", 3))
+            return max(2, min(6, v))
+    except Exception:
+        return 3
+MAX_FOLLOWS = _load_max_follows()
 
 # Submolt research 2026-04-28:
 #  - introductions: 131k subs, top hot posts score 95-141 — HIGHEST visibility
