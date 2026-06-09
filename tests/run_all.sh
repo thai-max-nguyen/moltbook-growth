@@ -14,3 +14,7 @@ echo "=== test_mundo_ab_closer.py ==="
 echo ""
 echo "=== test_reddit_token_refresh.sh ==="
 bash "${DIR}/test_reddit_token_refresh.sh" 2>&1 | tail -3
+
+echo ""
+echo "=== test_promo_safety.py ==="
+/usr/bin/python3 "${DIR}/test_promo_safety.py" 2>&1 | grep -E "PASS|FAIL|RESULT"

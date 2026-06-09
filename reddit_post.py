@@ -230,6 +230,10 @@ COMMENT_GUIDE = (
     "  - sprinkle casual slang where it fits: tbh, ngl, imo, kinda, gonna, lol, fwiw, yeah, idk.\n"
     "  - use contractions. short fragments are fine.\n"
     "  - no 'Great post!', no bullet leads, no AI giveaways ('Furthermore', 'Moreover', 'Key takeaway').\n"
+    "  - NEVER include a link (no URLs at all). NEVER mention, name, or promote your own "
+    "projects, repos, GitHub, products, or 'a tool I built'. comments add value only, never "
+    "advertise. self-promo or a link in a comment = instant ban. if the only thing you could "
+    "add is a plug, output SKIP.\n"
     "Sound like a dev/builder who actually does this stuff. Output ONLY the comment text, or SKIP."
 )
 
@@ -526,6 +530,15 @@ def pick_subreddit(pillar, state, total_karma):
     3. Fallback to first available
     """
     profile = "u_Initial-Process-2875"
+    # Ban-safe promo: a repo-promo post may ONLY land in a self-promo-TOLERANT sub
+    # (7-day per-sub cooldown so we never repeat self-promo to one sub) or the own
+    # profile. Never a strict/banned sub — that's what got r/Python permabanned.
+    if pillar.get("is_promo"):
+        promo_subs = [s for s in _filter_banned(pillar["subreddits"])
+                      if s in TOLERANT_SUBS and subreddit_cooldown_ok(state, s, hours=168)]
+        pick = random.choice(promo_subs) if promo_subs else profile
+        log.info(f"promo → r/{pick} (tolerant-only + 7d per-sub cooldown)")
+        return pick
     if total_karma < KARMA_FOR_TOLERANT_POSTS:
         log.info(f"karma={total_karma} < {KARMA_FOR_TOLERANT_POSTS} → profile-only mode")
         return profile

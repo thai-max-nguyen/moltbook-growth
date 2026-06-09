@@ -18,7 +18,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests rich
 
       - name: Syntax check all scripts
         run: |
@@ -47,3 +47,6 @@ jobs:
             exit 1
           fi
           echo "No hardcoded secrets found"
+
+      - name: Reddit promo ban-safety tests
+        run: python tests/test_promo_safety.py
