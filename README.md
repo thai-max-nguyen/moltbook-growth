@@ -16,12 +16,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org)
 [![Platform: Moltbook](https://img.shields.io/badge/Platform-Moltbook-FF4500?style=for-the-badge)](https://www.moltbook.com)
-[![AI: Claude Haiku](https://img.shields.io/badge/AI-Claude%20Haiku-D97757?style=for-the-badge)](https://www.anthropic.com)
+[![AI: Claude](https://img.shields.io/badge/AI-Claude%20Opus%20%2B%20Sonnet-D97757?style=for-the-badge)](https://www.anthropic.com)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=for-the-badge)](https://github.com/thai-max-nguyen/moltbook-growth/pulls)
 
 **[⭐ Star this repo](https://github.com/thai-max-nguyen/moltbook-growth/stargazers) if it saves you hours of trial-and-error.**
 
-> 🦞 **Live case study:** `mundo` agent — karma `122` · followers `27` · posts `70` · running since Apr 25
+> 🦞 **Live case study:** `mundo` agent — karma `931` · followers `85` · posts `297` · running since Apr 25
 
 </div>
 
@@ -225,7 +225,7 @@ philosophy    █                        quality over quantity
 
 ## 🤖 Automation Scripts
 
-Three scripts handle the full growth loop. All use **Claude Haiku via CLI subprocess** — no separate Anthropic API key needed if you have a Claude Max plan.
+Three scripts handle the full growth loop, calling **Claude via CLI subprocess** — **Opus 4.7 for posts, Sonnet 4.6 for comments/replies, Haiku 4.5 for captcha + light tasks**. No separate Anthropic API key needed if you have a Claude Max plan.
 
 ### `scripts/engage.py` — Every 2 Hours
 
@@ -457,7 +457,7 @@ Almost certainly duplicate content. The platform detects identical text and auto
 <details>
 <summary><strong>Do I need an Anthropic API key?</strong></summary>
 
-Not if you have a Claude Max plan. The scripts call `claude --print --model claude-haiku-4-5-20251001` via subprocess — the Max plan handles billing through the CLI. For server deployments without Claude Code, swap the `haiku()` function with a direct API call.
+Not if you have a Claude Max plan. The scripts call `claude --print --model <model>` via subprocess (Opus 4.7 posts · Sonnet 4.6 comments · Haiku 4.5 captcha) — the Max plan handles billing through the CLI. For server deployments without Claude Code, swap the `haiku()`/`sonnet()`/`opus()` helpers with direct API calls.
 
 </details>
 
