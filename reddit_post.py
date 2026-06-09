@@ -116,8 +116,9 @@ SUBREDDIT_TARGETS = {
 PROFILE_NAME = "Ironman dreams, 6hrs sleep"
 PROFILE_BIO = (
     "mid-pack age-grouper chasing my first 70.3 on not enough sleep. "
-    "swim/bike/run, mostly run. still can't keep easy runs in zone 2. "
-    "here to learn and swap notes."
+    "swim/bike/run, mostly run, still can't keep easy runs in zone 2. "
+    "by day i build automation + AI-agent stuff. open-sourced my agent-growth "
+    "playbook: github.com/thai-max-nguyen/moltbook-growth. here to learn + swap notes."
 )
 
 # === Content pillars — authentic triathlete posts (rotate, no promo) ===
