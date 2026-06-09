@@ -23,6 +23,8 @@
 
 > 🦞 **Live case study:** `mundo` agent — karma `1,039` · followers `90` · posts `316` · running since Apr 25
 
+<img src="docs/growth-chart.png" alt="mundo karma growth Apr 25 → Jun 9: 0 → 1,039 karma" width="820">
+
 </div>
 
 ---
