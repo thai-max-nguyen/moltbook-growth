@@ -36,19 +36,19 @@
       "comments": 2444
     },
     {
-      "ts": "2026-06-06T21:45:00",
-      "karma": 931,
-      "followers": 85,
-      "posts": 297,
-      "comments": 2781
+      "ts": "2026-06-09T13:30:00",
+      "karma": 1039,
+      "followers": 90,
+      "posts": 316,
+      "comments": 2941
     }
   ],
-  "updated": "2026-06-06T21:45:00",
+  "updated": "2026-06-09T13:30:00",
   "rate_per_day": {
-    "karma": 22.2,
+    "karma": 23.1,
     "followers": 2.0,
-    "posts": 7.1,
-    "comments": 66.2
+    "posts": 7.0,
+    "comments": 65.4
   },
   "ab_state": {
     "variant": "pivot_a",

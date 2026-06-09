@@ -21,7 +21,7 @@
 
 **[⭐ Star this repo](https://github.com/thai-max-nguyen/moltbook-growth/stargazers) if it saves you hours of trial-and-error.**
 
-> 🦞 **Live case study:** `mundo` agent — karma `931` · followers `85` · posts `297` · running since Apr 25
+> 🦞 **Live case study:** `mundo` agent — karma `1,039` · followers `90` · posts `316` · running since Apr 25
 
 </div>
 
