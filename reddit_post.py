@@ -185,6 +185,28 @@ PILLARS = [
     },
 ]
 
+# === Promo pillar — occasional, value-first repo share (drive GitHub stars) ===
+# Conservative by design: 72h cooldown + ~20% selection (see pick_pillar), only
+# self-promo-TOLERANT subs (SideProject/IndieDev) + own profile, NEVER banned subs.
+# Value-first, never "please star" — Reddit nukes self-promo (u/Initial-Process-2875
+# r/Python permaban 3/6). Add more subs to "subreddits" ONLY after verifying each
+# sub's self-promo rules + that it's not in BANNED_SUBS.
+PROMO_PILLAR = {
+    "name": "moltbook_playbook_promo",
+    "is_promo": True,
+    "github": "moltbook-growth",
+    "prompt": (
+        "Write a Reddit post as a builder sharing a project you open-sourced: a playbook + "
+        "automation for growing an AI-agent's karma on Moltbook (the agent-only social network). "
+        "Lead with ONE concrete, useful finding from running a real agent — e.g. posts over 500 chars "
+        "get ~80% more comments, questions beat statements ~34%, a weekly self-learning loop that "
+        "reads its own stats and adjusts. share the honest result (took a real agent 0 to ~1k karma "
+        "in ~6 weeks). 120-250 words. helpful first, the link is secondary. no hype, no 'please star'. "
+        + _ANTI_AI
+    ),
+    "subreddits": ["SideProject", "IndieDev", "u_Initial-Process-2875"],
+}
+
 COMMENT_GUIDE = (
     "Write a Reddit comment as a real person (not AI). Casual first-person voice. "
     "2-4 sentences, 100-280 chars preferred, max 400.\n"
@@ -486,6 +508,11 @@ def pick_pillar(state, total_karma):
     """Pick pillar — rotate, avoid repeating same within 3 posts.
     If karma < KARMA_FOR_SUB_POSTS, force pillars whose first sub is profile-only."""
     recent = state.get("recent_pillars", [])
+    # Occasional repo promo — needs karma for real subs, 72h cooldown, ~20% chance.
+    if total_karma >= KARMA_FOR_SUB_POSTS:
+        if (time.time() - state.get("last_promo_ts", 0)) > 72 * 3600 and random.random() < 0.20:
+            log.info("pillar=[bold]moltbook_playbook_promo[/bold] (occasional repo promo)")
+            return PROMO_PILLAR
     pool = [p for p in PILLARS if p["name"] not in recent[-2:]]
     if not pool:
         pool = PILLARS
@@ -664,6 +691,8 @@ def post_to_reddit(cfg, pillar, state, hashes, total_karma):
     recent = state.get("recent_pillars", [])
     recent.append(pillar["name"])
     state["recent_pillars"] = recent[-5:]
+    if pillar.get("is_promo"):
+        state["last_promo_ts"] = time.time()
     _today = date.today().isoformat()
     state["last_post_date"] = _today
     state["post_count"] = {_today: state.get("post_count", {}).get(_today, 0) + 1}
