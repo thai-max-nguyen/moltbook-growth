@@ -858,6 +858,21 @@ def posts_today(state):
     return state.get("post_count", {}).get(date.today().isoformat(), 0)
 
 
+def _promo_eligible(state, total_karma):
+    """Promo may fire only with enough karma for tolerant subs and past the
+    72h cooldown — the same gates pick_pillar uses, minus the 20% dice (a
+    cap-exempt slot is dedicated to promo, so it shouldn't roll the dice)."""
+    return (total_karma >= KARMA_FOR_SUB_POSTS
+            and (time.time() - state.get("last_promo_ts", 0)) > 72 * 3600)
+
+
+def _promo_fired_today(state):
+    """True if a promo already went out today — prevents a second promo when
+    both the 23:00 and 07:00 cap-exempt slots run on the same calendar day."""
+    ts = state.get("last_promo_ts", 0)
+    return bool(ts) and date.fromtimestamp(ts) == date.today()
+
+
 def set_profile(cfg):
     """Set the profile display name (title) + bio (public_description) via the
     API, PRESERVING all other profile-subreddit settings (read from about/edit
@@ -956,7 +971,16 @@ def main():
 
     if args.mode in ("post", "both"):
         if posts_today(state) >= POSTS_PER_DAY:
-            log.info(f"already posted {POSTS_PER_DAY}x today — skipping post")
+            # Daily cap throttles REGULAR pillars only (growth-monitor tuned to
+            # 1/day while link-karma is flat). The GitHub promo is EXEMPT: a
+            # later slot (23:00/07:00) may fire a promo-only post if eligible
+            # and none fired today. Promo still respects the 72h cooldown,
+            # karma gate, and tolerant-sub/ban-safe targeting.
+            if _promo_eligible(state, total_karma) and not _promo_fired_today(state):
+                log.info("daily cap reached — firing promo-only slot (cap exempts promo)")
+                post_to_reddit(cfg, PROMO_PILLAR, state, hashes, total_karma)
+            else:
+                log.info(f"already posted {POSTS_PER_DAY}x today — skipping post")
         else:
             pillar = pick_pillar(state, total_karma)
             post_to_reddit(cfg, pillar, state, hashes, total_karma)
