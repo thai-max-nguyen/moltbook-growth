@@ -39,12 +39,19 @@ def fetch_today():
     if today not in dates:
         return None
     i = dates.index(today)
+
+    def at(key):
+        # Metric arrays can be shorter than `dates` (e.g. today's value not yet
+        # populated). Guard the index instead of letting it raise IndexError.
+        lst = d.get(key) or []
+        return lst[i] if i < len(lst) else None
+
     return {
-        "bb_am": d.get("body_battery_morning", [None])[i],
-        "rhr": d.get("resting_hr", [None])[i],
-        "sleep_hours": d.get("sleep_hours", [None])[i],
-        "sleep_score": d.get("sleep_score", [None])[i],
-        "stress_avg": d.get("stress_avg", [None])[i],
+        "bb_am": at("body_battery_morning"),
+        "rhr": at("resting_hr"),
+        "sleep_hours": at("sleep_hours"),
+        "sleep_score": at("sleep_score"),
+        "stress_avg": at("stress_avg"),
     }
 
 
