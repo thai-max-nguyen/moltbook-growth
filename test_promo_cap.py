@@ -86,3 +86,19 @@ def test_decision_capped_low_karma_skips(monkeypatch):
         if rp._promo_eligible(state, total_karma) and not rp._promo_fired_today(state):
             rp.post_to_reddit({}, rp.PROMO_PILLAR, state, {}, total_karma)
     assert calls == []
+
+
+# ── promo link-karma gate (2026-06-10 filter-removal fix) ──────────────────
+def test_promo_profile_only_at_low_link_karma():
+    promo = rp.PROMO_PILLAR
+    # link_karma below threshold → must route to own profile (filter-safe)
+    assert rp.pick_subreddit(promo, {"link_karma": 1}, 80) == "u_Initial-Process-2875"
+    assert rp.pick_subreddit(promo, {"link_karma": 0}, 80) == "u_Initial-Process-2875"
+    assert rp.pick_subreddit(promo, {}, 80) == "u_Initial-Process-2875"  # missing = 0
+
+
+def test_promo_allows_sub_once_link_karma_built():
+    promo = rp.PROMO_PILLAR
+    pick = rp.pick_subreddit(promo, {"link_karma": 30}, 80)
+    # tolerant sub OR profile (cooldown), never a banned/strict sub
+    assert pick in rp.TOLERANT_SUBS or pick == "u_Initial-Process-2875"

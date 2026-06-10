@@ -47,6 +47,12 @@ KARMA_FOR_FAST_MODE = 100   # above this, drop to 90-180s between comments
 FAST_DELAY_MIN_S    = 90
 FAST_DELAY_MAX_S    = 180
 KARMA_FOR_SUB_POSTS = 50    # below this, only profile posts (others auto-removed)
+# Link-karma gate for PROMO link-posts (2026-06-10). A repo-promo with a GitHub
+# URL in the body gets auto-removed by Reddit's spam filter when the account has
+# ~no link karma — even in tolerant subs (r/IndieDev promo removed 07:00 today,
+# account link_karma=1). Until link_karma clears this, promo goes PROFILE-ONLY
+# (own-profile posts aren't filter-nuked the same way). Comment karma ≠ link karma.
+LINK_KARMA_FOR_PROMO = 15
 # 2026-05-28: tolerant-sub threshold — r/SideProject + r/IndieDev allow show-and-tell
 # from accounts with karma >= 25. Below this stays profile-only; between 25-49,
 # pick_subreddit() can attempt one tolerant sub per day (still falls back to profile
@@ -224,6 +230,10 @@ COMMENT_GUIDE = (
     "  - add a specific detail they missed ('one thing worth noting, <mechanism>')\n"
     "  - agree + extend ('yeah, the part that surprised me was <X>')\n"
     "  - friendly pushback ('idk, disagree on <specific point>, in my experience <Y>')\n\n"
+    "Downvote-avoidance: SKIP controversy/drama/rules-debate threads. Taking a side — even just "
+    "agreeing with the OP — gets downvoted when the community disagrees. If the post is a complaint, "
+    "a 'is X allowed/fair/cheating' argument, or a hot take, and you are not certain of the facts and "
+    "the community consensus, output SKIP. Never validate a grievance to farm engagement.\n"
     "Style rules (match real reddit, avoid AI tells):\n"
     "  - NEVER use em-dashes (—) or en-dashes (–). use commas, periods, or just split the "
     "sentence. the em-dash is the #1 AI giveaway.\n"
@@ -262,6 +272,8 @@ TRIATHLETE_GUIDE = (
     "  - share ONE concrete thing from your own training when relevant (a number, a session, a mistake you made). never a generic pep talk.\n"
     "  - if the post needs expertise you don't have (advanced bike fit, coaching plans, medical advice, fast-AG race tactics), output exactly SKIP. a fake expert reply gets you banned.\n"
     "  - if you'd only be saying 'nice job' or 'good luck' with nothing specific, output exactly SKIP.\n"
+    "  - AVOID rules/fairness/'is this cheating' debates (drafting, course-cutting, ITU vs WTC rules, penalties). they're nuanced and the community downvotes naive takes. if the post is a complaint or a rules argument, SKIP unless you can add one calm, correct fact. KNOW: swim drafting is LEGAL and unavoidable in mass starts; only bike drafting is penalized in non-draft races, don't conflate them or call legal drafting 'unfair'.\n"
+    "  - NEVER pile onto or validate a grievance ('yeah that'd bug me', 'that's so unfair') just to engage. agreeing with a wrong/naive complaint invites correction and downvotes. stay neutral or genuinely curious, or SKIP.\n"
     "  - NEVER em-dashes. start most sentences lowercase. contractions, fragments fine. slang ok (tbh, ngl, imo, kinda, fwiw).\n"
     "  - no 'as someone who', no 'great post', no 'happy training', no pep-talk filler, no AI tells.\n"
     "  - no links, no self-promo, ever.\n"
@@ -535,6 +547,14 @@ def pick_subreddit(pillar, state, total_karma):
     # (7-day per-sub cooldown so we never repeat self-promo to one sub) or the own
     # profile. Never a strict/banned sub — that's what got r/Python permabanned.
     if pillar.get("is_promo"):
+        # Link-karma gate: a GitHub-link promo to a real sub gets filter-removed
+        # at low link karma (r/IndieDev removal 2026-06-10). Route to profile
+        # until link karma is built — profile posts survive the spam filter.
+        lk = state.get("link_karma", 0)
+        if lk < LINK_KARMA_FOR_PROMO:
+            log.info(f"promo → profile-only (link_karma {lk} < {LINK_KARMA_FOR_PROMO}: "
+                     f"sub link-posts get filter-removed)")
+            return profile
         promo_subs = [s for s in _filter_banned(pillar["subreddits"])
                       if s in TOLERANT_SUBS and subreddit_cooldown_ok(state, s, hours=168)]
         pick = random.choice(promo_subs) if promo_subs else profile
@@ -714,6 +734,28 @@ def post_to_reddit(cfg, pillar, state, hashes, total_karma):
     return True
 
 
+_SCORE_LEARNINGS_CACHE = None
+
+
+def _score_learnings_block():
+    """Inject the latest own-comment score feedback (winners to emulate,
+    downvoted angles to avoid) into the comment prompt. Written by
+    reddit_score_learn.py (cron). Empty string if the file is missing —
+    safe no-op. Cached per process so we read the file once per run."""
+    global _SCORE_LEARNINGS_CACHE
+    if _SCORE_LEARNINGS_CACHE is not None:
+        return _SCORE_LEARNINGS_CACHE
+    path = os.path.join(DATA_DIR, "reddit_score_learnings.md")
+    try:
+        with open(path) as f:
+            body = f.read().strip()
+        _SCORE_LEARNINGS_CACHE = ("\n\nLEARN FROM YOUR OWN RECENT SCORES "
+                                  "(reddit up/downvotes):\n" + body) if body else ""
+    except Exception:
+        _SCORE_LEARNINGS_CACHE = ""
+    return _SCORE_LEARNINGS_CACHE
+
+
 def comment_on_feed(cfg, state, hashes, total_karma):
     """Leave 2-4 genuine comments on relevant posts to build karma.
     Below karma threshold, prioritize high-volume subs to escape profile-only mode faster."""
@@ -785,7 +827,7 @@ def comment_on_feed(cfg, state, hashes, total_karma):
             guide = TRIATHLETE_GUIDE if is_tri else COMMENT_GUIDE
             comment_text = haiku(
                 f'Subreddit: r/{sub_name}\nPost title: "{title}"\nPost body: "{body}"\n\n'
-                f'{guide}'
+                f'{guide}{_score_learnings_block()}'
             )
             if not comment_text or len(comment_text) < 30:
                 state[f"seen_{pid}"] = True
@@ -963,6 +1005,7 @@ def main():
     link_karma  = me_data.get("link_karma", 0)
     comment_karma = me_data.get("comment_karma", 0)
     total_karma = link_karma + comment_karma
+    state["link_karma"] = link_karma  # for the promo link-karma gate (pick_subreddit)
     log.info(f"auth ok — u/{username} | karma: link={link_karma} comment={comment_karma} total={total_karma}")
 
     if args.mode == "profile":
